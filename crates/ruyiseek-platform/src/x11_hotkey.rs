@@ -6,6 +6,8 @@ use crate::hotkey::{
     ControlKey, DoubleCtrlRecognizer, GestureContext, GestureDecision, Key, KeyEvent, KeyState,
 };
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 use x11rb::connection::Connection;
@@ -46,6 +48,7 @@ impl std::error::Error for HotkeyError {}
 ///
 /// Returns [`HotkeyError`] if X11/XInput2 setup fails or the worker cannot be spawned.
 pub fn spawn_double_ctrl_listener<Callback>(
+    session_locked: Arc<AtomicBool>,
     on_trigger: Callback,
 ) -> Result<JoinHandle<()>, HotkeyError>
 where
@@ -89,7 +92,16 @@ where
     let atoms = FullscreenAtoms::load(&connection)?;
     thread::Builder::new()
         .name("ruyiseek-x11-hotkey".to_owned())
-        .spawn(move || run_event_loop(&connection, root, keymap, &atoms, &on_trigger))
+        .spawn(move || {
+            run_event_loop(
+                &connection,
+                root,
+                keymap,
+                &atoms,
+                &session_locked,
+                &on_trigger,
+            );
+        })
         .map_err(|error| HotkeyError(format!("启动 X11 热键线程失败：{error}")))
 }
 
@@ -98,6 +110,7 @@ fn run_event_loop<Callback>(
     root: Window,
     mut keymap: KeyMap,
     atoms: &FullscreenAtoms,
+    session_locked: &AtomicBool,
     on_trigger: &Callback,
 ) where
     Callback: Fn(),
@@ -137,7 +150,7 @@ fn run_event_loop<Callback>(
             recognizer.handle(
                 event,
                 GestureContext {
-                    session_locked: false,
+                    session_locked: session_locked.load(Ordering::Acquire),
                     fullscreen_blocked,
                 },
             ) == GestureDecision::Triggered

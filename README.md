@@ -15,12 +15,13 @@
 - 有长度上限的 Unix Socket 帧协议；
 - Slint 原生无边框启动器、异步查询、键盘选择、回车打开和错误状态；
 - X11/XInput2 原始按键监听，把双击 Ctrl 接入真实窗口显示/隐藏；
+- 通过 systemd-logind `LockedHint` 监听真实锁屏状态，锁屏时抑制全局唤醒；
 - 基于 D-Bus 的 GUI 单实例控制，重复启动会唤醒已有窗口；
 - StatusNotifierItem 系统托盘，支持显示、隐藏和完全退出；
 - daemon、CLI 与 GUI 之间可运行的端到端查询链路；
-- `--background` 常驻模式，以及 systemd 用户服务和 D-Bus 激活配置。
+- `--background` 常驻模式，以及 systemd 用户服务、D-Bus 激活和 Deepin XDG Autostart 配置。
 
-锁屏状态接入、自动启动冲突处理和持久化增量索引仍在后续迭代中。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口、搜索、单实例与托盘可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
+持久化增量索引和安装打包仍在后续迭代中。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口、搜索、单实例与托盘可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
 
 ## 构建
 
@@ -66,6 +67,8 @@ cargo run -p ruyiseek-ui -- --quit
 ```
 
 托盘遵循 StatusNotifierItem/DBusMenu 协议，在 DDE 支持该协议的托盘区域中显示；左键显示窗口，菜单可隐藏窗口或完全退出后台进程。
+
+自动启动提供两种打包入口：systemd 用户服务和 `packaging/autostart` 下的 Deepin XDG Autostart 文件。安装器应按目标系统选择其中一种；即使用户误启用两种，D-Bus 单实例也会让后启动进程正常退出。锁屏状态无法确认时采取安全关闭策略：保留托盘和搜索，但停用全局双击 Ctrl。
 
 不连接显示服务器，仅验证双击 Ctrl 状态机：
 

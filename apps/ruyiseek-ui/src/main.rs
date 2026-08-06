@@ -19,6 +19,7 @@ mod generated_ui {
 use generated_ui::{LauncherResult, LauncherWindow};
 
 mod session_bus;
+mod session_lock;
 mod tray;
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
@@ -347,7 +348,12 @@ fn run_worker_command(command: WorkerCommand) -> UiEvent {
     }
 }
 
-fn install_hotkey(ui_sender: &Sender<UiEvent>) -> Option<thread::JoinHandle<()>> {
+struct HotkeyRuntime {
+    _listener: thread::JoinHandle<()>,
+    _lock_monitor: session_lock::Monitor,
+}
+
+fn install_hotkey(ui_sender: &Sender<UiEvent>) -> Option<HotkeyRuntime> {
     if std::env::var("XDG_SESSION_TYPE").is_ok_and(|value| value.eq_ignore_ascii_case("wayland")) {
         let _ = ui_sender.send(UiEvent::HotkeyIssue(
             "Wayland 会话暂不监听修饰键；可从应用菜单打开".to_owned(),
@@ -355,11 +361,28 @@ fn install_hotkey(ui_sender: &Sender<UiEvent>) -> Option<thread::JoinHandle<()>>
         return None;
     }
 
+    let lock_monitor = match session_lock::spawn() {
+        Ok(monitor) => monitor,
+        Err(error) => {
+            eprintln!("ruyiseek-ui: 无法确认锁屏状态：{error}");
+            let _ = ui_sender.send(UiEvent::HotkeyIssue(
+                "无法确认锁屏状态；为避免锁屏误唤醒，双击 Ctrl 已停用".to_owned(),
+            ));
+            return None;
+        }
+    };
+
     let trigger_sender = ui_sender.clone();
-    match ruyiseek_platform::x11_hotkey::spawn_double_ctrl_listener(move || {
-        let _ = trigger_sender.send(UiEvent::Desktop(DesktopAction::Toggle));
-    }) {
-        Ok(handle) => Some(handle),
+    match ruyiseek_platform::x11_hotkey::spawn_double_ctrl_listener(
+        lock_monitor.state(),
+        move || {
+            let _ = trigger_sender.send(UiEvent::Desktop(DesktopAction::Toggle));
+        },
+    ) {
+        Ok(listener) => Some(HotkeyRuntime {
+            _listener: listener,
+            _lock_monitor: lock_monitor,
+        }),
         Err(error) => {
             eprintln!("ruyiseek-ui: 双击 Ctrl 不可用：{error}");
             let _ = ui_sender.send(UiEvent::HotkeyIssue(format!("双击 Ctrl 不可用：{error}")));

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=如意寻后台服务
+Name[en]=RuyiSeek background service
+Comment=登录后启动如意寻托盘与双击 Ctrl 唤醒
+Comment[en]=Start the RuyiSeek tray and double-Control activation after login
+Exec=ruyiseek-ui --background
+Icon=io.github.ethanbird.RuyiSeek
+Terminal=false
+OnlyShowIn=Deepin;
+X-GNOME-Autostart-enabled=true
