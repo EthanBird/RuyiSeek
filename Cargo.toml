@@ -1,0 +1,26 @@
+[workspace]
+members = [
+    "apps/ruyi-cli",
+    "apps/ruyiseek-ui",
+    "apps/ruyiseekd",
+    "crates/ruyiseek-core",
+    "crates/ruyiseek-index",
+    "crates/ruyiseek-ipc",
+    "crates/ruyiseek-platform",
+    "crates/ruyiseek-query",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["RuyiSeek contributors"]
+repository = "https://github.com/EthanBird/RuyiSeek"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"

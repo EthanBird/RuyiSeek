@@ -1,0 +1,12 @@
+[Unit]
+Description=RuyiSeek search daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ruyiseekd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

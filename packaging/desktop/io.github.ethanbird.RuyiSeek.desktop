@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=如意寻
+Name[en]=RuyiSeek
+Comment=快速查找文件、应用与命令
+Comment[en]=Quickly find files, applications and commands
+Exec=ruyiseek-ui
+Icon=io.github.ethanbird.RuyiSeek
+Terminal=false
+Categories=Utility;FileTools;
+StartupNotify=false
+X-Deepin-Vendor=user-custom

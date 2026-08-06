@@ -1,0 +1,17 @@
+[package]
+name = "ruyiseekd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+ruyiseek-index = { path = "../../crates/ruyiseek-index" }
+ruyiseek-ipc = { path = "../../crates/ruyiseek-ipc" }
+ruyiseek-query = { path = "../../crates/ruyiseek-query" }
+
+[dev-dependencies]
+ruyiseek-core = { path = "../../crates/ruyiseek-core" }
+
+[lints]
+workspace = true

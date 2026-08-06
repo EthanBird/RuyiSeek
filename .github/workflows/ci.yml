@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust 1.75 baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install minimum Rust toolchain
+        run: rustup toolchain install 1.75.0 --profile minimal --component rustfmt,clippy
+
+      - name: Check formatting
+        run: cargo +1.75.0 fmt --all -- --check
+
+      - name: Run tests
+        run: cargo +1.75.0 test --workspace --locked
+
+      - name: Run Clippy
+        run: cargo +1.75.0 clippy --workspace --all-targets --locked -- -D warnings

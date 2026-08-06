@@ -1,0 +1,16 @@
+[package]
+name = "ruyi-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ruyi"
+path = "src/main.rs"
+
+[dependencies]
+ruyiseek-ipc = { path = "../../crates/ruyiseek-ipc" }
+
+[lints]
+workspace = true
