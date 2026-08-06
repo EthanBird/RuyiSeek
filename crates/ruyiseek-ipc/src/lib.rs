@@ -3,7 +3,10 @@
 use ruyiseek_core::{ItemKind, SearchHit, SearchItem};
 use std::fmt;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_FRAME_SIZE: usize = 1024 * 1024;
@@ -66,6 +69,70 @@ impl From<io::Error> for ProtocolError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
+}
+
+#[derive(Debug)]
+pub enum ClientError {
+    Connect { socket: PathBuf, source: io::Error },
+    Protocol(ProtocolError),
+}
+
+impl fmt::Display for ClientError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Connect { socket, source } => {
+                write!(
+                    formatter,
+                    "cannot connect to {}: {source}",
+                    socket.display()
+                )
+            }
+            Self::Protocol(source) => source.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for ClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Connect { source, .. } => Some(source),
+            Self::Protocol(source) => Some(source),
+        }
+    }
+}
+
+impl From<ProtocolError> for ClientError {
+    fn from(source: ProtocolError) -> Self {
+        Self::Protocol(source)
+    }
+}
+
+impl From<io::Error> for ClientError {
+    fn from(source: io::Error) -> Self {
+        Self::Protocol(source.into())
+    }
+}
+
+/// Send one request to a local daemon socket and decode its response.
+///
+/// # Errors
+///
+/// Returns [`ClientError`] when the socket cannot be reached or the bounded protocol exchange
+/// fails.
+#[cfg(unix)]
+pub fn request_daemon(
+    socket: &Path,
+    request: &Request,
+    timeout: Duration,
+) -> Result<Response, ClientError> {
+    let mut stream = UnixStream::connect(socket).map_err(|source| ClientError::Connect {
+        socket: socket.to_path_buf(),
+        source,
+    })?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    write_frame(&mut stream, &encode_request(request))?;
+    Ok(decode_response(&read_frame(&mut stream)?)?)
 }
 
 #[must_use]

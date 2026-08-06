@@ -1,0 +1,201 @@
+import { LineEdit } from "std-widgets.slint";
+
+export struct LauncherResult {
+    title: string,
+    path: string,
+    kind: string,
+    score: string,
+}
+
+export component LauncherWindow inherits Window {
+    callback query-edited(string);
+    callback activate-result(int);
+    callback dismiss();
+
+    public function focus-query() {
+        query-input.focus();
+    }
+
+    in property <[LauncherResult]> results: [];
+    in property <string> status-text: "正在连接后台服务…";
+    in-out property <string> query: "";
+    in-out property <int> selected-index: 0;
+
+    title: "如意寻";
+    width: 720px;
+    height: 122px + Math.min(root.results.length, 9) * 54px;
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+
+    focus-scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.DownArrow && root.results.length > 0) {
+                root.selected-index = Math.min(root.selected-index + 1, root.results.length - 1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow && root.results.length > 0) {
+                root.selected-index = Math.max(root.selected-index - 1, 0);
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                if (root.query != "") {
+                    root.query = "";
+                    root.query-edited("");
+                } else {
+                    root.dismiss();
+                }
+                return accept;
+            }
+            return reject;
+        }
+
+        Rectangle {
+            background: #f7fafcee;
+            border-color: #cbd7e3aa;
+            border-width: 1px;
+            border-radius: 16px;
+            drop-shadow-blur: 28px;
+            drop-shadow-color: #10263a45;
+            drop-shadow-offset-y: 10px;
+            clip: true;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    height: 62px;
+                    spacing: 12px;
+
+                    Rectangle {
+                        width: 42px;
+                        height: 42px;
+                        border-radius: 12px;
+                        background: #176b87;
+
+                        Text {
+                            text: "寻";
+                            color: white;
+                            font-size: 21px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    query-input := LineEdit {
+                        height: 42px;
+                        text <=> root.query;
+                        placeholder-text: "搜索文件、文件夹、应用或命令";
+                        font-size: 19px;
+                        edited(text) => {
+                            root.selected-index = 0;
+                            root.query-edited(text);
+                        }
+                        accepted(text) => {
+                            if (root.results.length > 0) {
+                                root.activate-result(root.selected-index);
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 66px;
+                        height: 28px;
+                        border-radius: 8px;
+                        background: #e6edf3;
+
+                        Text {
+                            text: "Ctrl ×2";
+                            color: #536574;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                if root.results.length == 0 : Rectangle {
+                    height: 28px;
+
+                    Text {
+                        text: root.status-text;
+                        color: #71818e;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                for result[index] in root.results : Rectangle {
+                    height: 46px;
+                    border-radius: 10px;
+                    background: index == root.selected-index
+                        ? #dcecf2
+                        : result-touch.has-hover ? #edf4f7 : transparent;
+
+                    result-touch := TouchArea {
+                        clicked => {
+                            root.selected-index = index;
+                            root.activate-result(index);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 10px;
+
+                        Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            border-radius: 9px;
+                            background: result.kind == "文件夹" ? #d9eee7 : #e8edf2;
+
+                            Text {
+                                text: result.kind == "文件夹" ? "夹" : "文";
+                                color: result.kind == "文件夹" ? #26765e : #52697b;
+                                font-size: 14px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 1px;
+
+                            Text {
+                                text: result.title;
+                                color: #152735;
+                                font-size: 14px;
+                                font-weight: index == root.selected-index ? 600 : 400;
+                                overflow: elide;
+                                vertical-alignment: bottom;
+                            }
+
+                            Text {
+                                text: result.path;
+                                color: #71818e;
+                                font-size: 11px;
+                                overflow: elide;
+                                vertical-alignment: top;
+                            }
+                        }
+
+                        Text {
+                            width: 46px;
+                            text: result.score;
+                            color: #81909b;
+                            font-size: 10px;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

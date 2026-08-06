@@ -6,16 +6,19 @@
 
 ## 当前进度
 
-仓库目前处于阶段 A 的首个纵向切片：
+仓库目前完成了阶段 A1 的第二个纵向切片：
 
 - Rust workspace 及 `ruyiseekd`、`ruyiseek-ui`、`ruyi` 三个进程入口；
 - 可独立测试的双击 Ctrl 状态机，覆盖长按、组合键、自动重复和锁屏/全屏抑制；
 - 安全的目录快照扫描器，不跟随符号链接；
 - 文件/目录内存搜索、基础排序和 Top-K 截断；
 - 有长度上限的 Unix Socket 帧协议；
-- daemon、CLI 与 UI 开发壳之间可运行的端到端查询链路。
+- Slint 原生无边框启动器、异步查询、键盘选择、回车打开和错误状态；
+- X11/XInput2 原始按键监听，把双击 Ctrl 接入真实窗口显示/隐藏；
+- daemon、CLI 与 GUI 之间可运行的端到端查询链路；
+- `--background` 常驻模式及对应的 systemd 用户服务配置。
 
-Slint 窗口、XInput2 原始事件、StatusNotifierItem 托盘和 D-Bus 单实例是下一迭代的接入重点。现在的 `ruyiseek-ui` 是验证进程边界与热键状态机的开发壳，不冒充最终 GUI。
+StatusNotifierItem 托盘、D-Bus 单实例/激活、锁屏状态接入和持久化增量索引仍在后续迭代中。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口和搜索可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
 
 ## 构建
 
@@ -40,7 +43,19 @@ cargo run -p ruyiseekd -- --root "$PWD"
 cargo run -p ruyi-cli -- search 设计文档
 ```
 
-验证 UI 进程边界与双击 Ctrl 判定：
+启动真实搜索窗口（需要已运行的图形会话）：
+
+```bash
+cargo run -p ruyiseek-ui
+```
+
+以隐藏常驻模式启动，等待 X11 下双击 Ctrl：
+
+```bash
+cargo run -p ruyiseek-ui -- --background
+```
+
+不连接显示服务器，仅验证双击 Ctrl 状态机：
 
 ```bash
 cargo run -p ruyiseek-ui -- --demo-double-ctrl

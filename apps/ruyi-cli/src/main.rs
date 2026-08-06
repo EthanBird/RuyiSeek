@@ -1,10 +1,6 @@
-use ruyiseek_ipc::{
-    decode_response, default_socket_path, encode_request, read_frame, write_frame, Request,
-    Response,
-};
+use ruyiseek_ipc::{default_socket_path, request_daemon, Request, Response};
 use std::error::Error;
-use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -13,21 +9,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let Some((socket, request)) = parse_args(std::env::args().skip(1))? else {
         return Ok(());
     };
-    let response = round_trip(&socket, &request)?;
+    let response = request_daemon(&socket, &request, TIMEOUT)
+        .map_err(|error| format!("{error}. Start ruyiseekd first"))?;
     print_response(response)
-}
-
-fn round_trip(socket: &Path, request: &Request) -> Result<Response, Box<dyn Error>> {
-    let mut stream = UnixStream::connect(socket).map_err(|error| {
-        format!(
-            "cannot connect to ruyiseekd at {}: {error}. Start ruyiseekd first",
-            socket.display()
-        )
-    })?;
-    stream.set_read_timeout(Some(TIMEOUT))?;
-    stream.set_write_timeout(Some(TIMEOUT))?;
-    write_frame(&mut stream, &encode_request(request))?;
-    Ok(decode_response(&read_frame(&mut stream)?)?)
 }
 
 fn print_response(response: Response) -> Result<(), Box<dyn Error>> {

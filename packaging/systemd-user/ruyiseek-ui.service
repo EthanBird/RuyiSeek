@@ -5,7 +5,7 @@ Requires=ruyiseekd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ruyiseek-ui
+ExecStart=/usr/bin/ruyiseek-ui --background
 Restart=on-failure
 RestartSec=2
 

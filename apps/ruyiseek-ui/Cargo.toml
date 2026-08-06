@@ -4,10 +4,27 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+build = "build.rs"
 
 [dependencies]
 ruyiseek-ipc = { path = "../../crates/ruyiseek-ipc" }
-ruyiseek-platform = { path = "../../crates/ruyiseek-platform" }
+ruyiseek-platform = { path = "../../crates/ruyiseek-platform", features = ["x11"] }
+slint = { version = "=1.6.0", default-features = false, features = [
+    "backend-winit-wayland",
+    "backend-winit-x11",
+    "compat-1-2",
+    "renderer-software",
+    "std",
+] }
 
-[lints]
-workspace = true
+[build-dependencies]
+slint-build = "=1.6.0"
+
+# Slint 1.6 generated item-tree bindings contain audited internal unsafe blocks and emit their
+# own `allow(unsafe_code)`. The rest of the workspace keeps `unsafe_code = "forbid"`.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
