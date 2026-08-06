@@ -7,6 +7,9 @@ repository.workspace = true
 build = "build.rs"
 
 [dependencies]
+dbus = { version = "=0.9.7", features = ["vendored"] }
+dbus-crossroads = "=0.5.2"
+ksni = "=0.2.2"
 ruyiseek-ipc = { path = "../../crates/ruyiseek-ipc" }
 ruyiseek-platform = { path = "../../crates/ruyiseek-platform", features = ["x11"] }
 slint = { version = "=1.6.0", default-features = false, features = [
@@ -18,6 +21,9 @@ slint = { version = "=1.6.0", default-features = false, features = [
 ] }
 
 [build-dependencies]
+# `ksni` invokes `dbus-codegen` in the host dependency graph. Repeat the vendored feature here so
+# Rust 1.75 builds do not require a host `pkg-config` executable or libdbus development headers.
+dbus = { version = "=0.9.7", features = ["vendored"] }
 slint-build = "=1.6.0"
 
 # Slint 1.6 generated item-tree bindings contain audited internal unsafe blocks and emit their

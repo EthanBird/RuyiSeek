@@ -18,6 +18,9 @@ mod generated_ui {
 }
 use generated_ui::{LauncherResult, LauncherWindow};
 
+mod session_bus;
+mod tray;
+
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const SEARCH_LIMIT: usize = 9;
 const UI_POLL_INTERVAL: Duration = Duration::from_millis(16);
@@ -32,17 +35,33 @@ fn main() -> Result<(), Box<dyn Error>> {
         return demo_double_ctrl();
     }
 
-    run_launcher(options.background)
+    run_launcher(options.mode)
 }
 
-fn run_launcher(background: bool) -> Result<(), Box<dyn Error>> {
+fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
+    let (ui_sender, ui_receiver) = mpsc::channel();
+    let _instance_guard = match session_bus::claim_or_forward(ui_sender.clone(), mode.action()) {
+        Ok(session_bus::Claim::Primary(guard)) => Some(guard),
+        Ok(session_bus::Claim::Forwarded) => return Ok(()),
+        Err(error) => {
+            eprintln!("ruyiseek-ui: 无法接入桌面会话 D-Bus：{error}");
+            if matches!(mode, LaunchMode::Hide | LaunchMode::Quit) {
+                return Ok(());
+            }
+            None
+        }
+    };
+
+    if matches!(mode, LaunchMode::Hide | LaunchMode::Quit) {
+        return Ok(());
+    }
+
     let launcher = LauncherWindow::new()?;
-    let visible = Rc::new(Cell::new(!background));
+    let visible = Rc::new(Cell::new(false));
     let generation = Rc::new(Cell::new(0_u64));
     let result_paths = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
 
     let (worker_sender, worker_receiver) = mpsc::channel();
-    let (ui_sender, ui_receiver) = mpsc::channel();
     let _search_worker = spawn_search_worker(worker_receiver, ui_sender.clone());
     worker_sender.send(WorkerCommand::Status)?;
 
@@ -55,12 +74,23 @@ fn run_launcher(background: bool) -> Result<(), Box<dyn Error>> {
     );
 
     let _hotkey_thread = install_hotkey(&ui_sender);
-    let poll_timer =
-        install_ui_event_pump(&launcher, ui_receiver, generation, result_paths, visible);
+    let _tray_guard = match tray::spawn(ui_sender) {
+        Ok(guard) => Some(guard),
+        Err(error) => {
+            eprintln!("ruyiseek-ui: 无法启动系统托盘线程：{error}");
+            None
+        }
+    };
+    let poll_timer = install_ui_event_pump(
+        &launcher,
+        ui_receiver,
+        generation,
+        result_paths,
+        Rc::clone(&visible),
+    );
 
-    if !background {
-        launcher.show()?;
-        launcher.invoke_focus_query();
+    if let Some(action) = mode.action() {
+        apply_desktop_action(&launcher, &visible, action);
     }
     slint::run_event_loop_until_quit()?;
     drop(poll_timer);
@@ -169,7 +199,7 @@ fn install_ui_event_pump(
                         launcher.set_status_text(error.into());
                     }
                 },
-                UiEvent::ToggleLauncher => toggle_launcher(&launcher, &visible),
+                UiEvent::Desktop(action) => apply_desktop_action(&launcher, &visible, action),
                 UiEvent::HotkeyIssue(message) if launcher.get_query().trim().is_empty() => {
                     launcher.set_status_text(message.into());
                 }
@@ -206,20 +236,42 @@ fn apply_search_results(
     }
 }
 
-fn toggle_launcher(launcher: &LauncherWindow, visible: &Cell<bool>) {
-    if visible.get() {
-        match launcher.hide() {
-            Ok(()) => visible.set(false),
-            Err(error) => eprintln!("ruyiseek-ui: 隐藏启动器失败：{error}"),
-        }
-    } else {
-        match launcher.show() {
-            Ok(()) => {
-                visible.set(true);
-                launcher.invoke_focus_query();
+fn apply_desktop_action(launcher: &LauncherWindow, visible: &Cell<bool>, action: DesktopAction) {
+    match action {
+        DesktopAction::Show => show_launcher(launcher, visible),
+        DesktopAction::Hide => hide_launcher(launcher, visible),
+        DesktopAction::Toggle => {
+            if visible.get() {
+                hide_launcher(launcher, visible);
+            } else {
+                show_launcher(launcher, visible);
             }
-            Err(error) => eprintln!("ruyiseek-ui: 显示启动器失败：{error}"),
         }
+        DesktopAction::Quit => {
+            if let Err(error) = slint::quit_event_loop() {
+                eprintln!("ruyiseek-ui: 无法退出事件循环：{error}");
+            }
+        }
+    }
+}
+
+fn show_launcher(launcher: &LauncherWindow, visible: &Cell<bool>) {
+    match launcher.show() {
+        Ok(()) => {
+            visible.set(true);
+            launcher.invoke_focus_query();
+        }
+        Err(error) => eprintln!("ruyiseek-ui: 显示启动器失败：{error}"),
+    }
+}
+
+fn hide_launcher(launcher: &LauncherWindow, visible: &Cell<bool>) {
+    if !visible.get() {
+        return;
+    }
+    match launcher.hide() {
+        Ok(()) => visible.set(false),
+        Err(error) => eprintln!("ruyiseek-ui: 隐藏启动器失败：{error}"),
     }
 }
 
@@ -305,7 +357,7 @@ fn install_hotkey(ui_sender: &Sender<UiEvent>) -> Option<thread::JoinHandle<()>>
 
     let trigger_sender = ui_sender.clone();
     match ruyiseek_platform::x11_hotkey::spawn_double_ctrl_listener(move || {
-        let _ = trigger_sender.send(UiEvent::ToggleLauncher);
+        let _ = trigger_sender.send(UiEvent::Desktop(DesktopAction::Toggle));
     }) {
         Ok(handle) => Some(handle),
         Err(error) => {
@@ -353,8 +405,16 @@ enum UiEvent {
         generation: u64,
         result: Result<Vec<SearchResult>, String>,
     },
-    ToggleLauncher,
+    Desktop(DesktopAction),
     HotkeyIssue(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DesktopAction {
+    Show,
+    Hide,
+    Toggle,
+    Quit,
 }
 
 struct SearchResult {
@@ -364,24 +424,58 @@ struct SearchResult {
     score: f32,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum LaunchMode {
+    #[default]
+    Show,
+    Background,
+    Toggle,
+    Hide,
+    Quit,
+}
+
+impl LaunchMode {
+    const fn action(self) -> Option<DesktopAction> {
+        match self {
+            Self::Show => Some(DesktopAction::Show),
+            Self::Background => None,
+            Self::Toggle => Some(DesktopAction::Toggle),
+            Self::Hide => Some(DesktopAction::Hide),
+            Self::Quit => Some(DesktopAction::Quit),
+        }
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
 struct Options {
-    background: bool,
+    mode: LaunchMode,
     demo_double_ctrl: bool,
     help: bool,
 }
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, Box<dyn Error>> {
     let mut options = Options::default();
+    let mut explicit_mode = None;
     for argument in args {
         match argument.as_str() {
-            "--background" => options.background = true,
+            "--background" => set_mode(&mut explicit_mode, LaunchMode::Background)?,
+            "--toggle" => set_mode(&mut explicit_mode, LaunchMode::Toggle)?,
+            "--hide" => set_mode(&mut explicit_mode, LaunchMode::Hide)?,
+            "--quit" => set_mode(&mut explicit_mode, LaunchMode::Quit)?,
             "--demo-double-ctrl" => options.demo_double_ctrl = true,
             "-h" | "--help" => options.help = true,
             _ => return Err(format!("未知参数：{argument}").into()),
         }
     }
+    options.mode = explicit_mode.unwrap_or_default();
     Ok(options)
+}
+
+fn set_mode(target: &mut Option<LaunchMode>, mode: LaunchMode) -> Result<(), Box<dyn Error>> {
+    if target.replace(mode).is_some() {
+        return Err("只能指定一个启动/控制选项".into());
+    }
+    Ok(())
 }
 
 fn demo_double_ctrl() -> Result<(), Box<dyn Error>> {
@@ -414,7 +508,43 @@ const fn key_event(milliseconds: u64, state: KeyState) -> KeyEvent {
 
 fn print_help() {
     println!(
-        "ruyiseek-ui {version}\n\n用法：\n    ruyiseek-ui [--background]\n    ruyiseek-ui --demo-double-ctrl\n\n选项：\n    --background        以后台模式启动，等待双击 Ctrl 唤醒\n    --demo-double-ctrl  运行手势状态机演示\n    -h, --help          显示帮助",
+        "ruyiseek-ui {version}\n\n用法：\n    ruyiseek-ui [--background | --toggle | --hide | --quit]\n    ruyiseek-ui --demo-double-ctrl\n\n选项：\n    --background        隐藏启动并注册托盘、热键与 D-Bus 服务\n    --toggle            显示或隐藏已运行的搜索窗口\n    --hide              隐藏已运行的搜索窗口\n    --quit              完全退出已运行的如意寻界面进程\n    --demo-double-ctrl  运行手势状态机演示\n    -h, --help          显示帮助",
         version = env!("CARGO_PKG_VERSION")
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_args, LaunchMode, Options};
+
+    fn args(values: &[&str]) -> impl Iterator<Item = String> {
+        values
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    #[test]
+    fn normal_launch_requests_show() {
+        assert_eq!(parse_args(args(&[])).unwrap(), Options::default());
+    }
+
+    #[test]
+    fn parses_desktop_control_modes() {
+        for (argument, expected) in [
+            ("--background", LaunchMode::Background),
+            ("--toggle", LaunchMode::Toggle),
+            ("--hide", LaunchMode::Hide),
+            ("--quit", LaunchMode::Quit),
+        ] {
+            assert_eq!(parse_args(args(&[argument])).unwrap().mode, expected);
+        }
+    }
+
+    #[test]
+    fn rejects_conflicting_control_modes() {
+        let error = parse_args(args(&["--background", "--quit"])).unwrap_err();
+        assert_eq!(error.to_string(), "只能指定一个启动/控制选项");
+    }
 }
