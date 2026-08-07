@@ -1,4 +1,4 @@
-import { LineEdit } from "std-widgets.slint";
+import { Button, CheckBox, LineEdit } from "std-widgets.slint";
 
 export struct LauncherResult {
     title: string,
@@ -7,10 +7,226 @@ export struct LauncherResult {
     score: string,
 }
 
+component SettingsPanel inherits Rectangle {
+    callback save-settings(bool, bool, bool);
+    callback close-settings();
+
+    in-out property <bool> launch-at-login: false;
+    in-out property <bool> double-ctrl-enabled: true;
+    in-out property <bool> suppress-in-fullscreen: true;
+    in property <string> status-text: "修改后点击保存";
+
+    background: #f7fafc;
+    border-color: #c7d4df;
+    border-width: 1px;
+    border-radius: 16px;
+    drop-shadow-blur: 24px;
+    drop-shadow-color: #10263a38;
+    drop-shadow-offset-y: 8px;
+    clip: true;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 18px;
+
+        HorizontalLayout {
+            height: 52px;
+
+            VerticalLayout {
+                spacing: 2px;
+
+                Text {
+                    text: "如意寻设置";
+                    color: #152735;
+                    font-size: 22px;
+                    font-weight: 700;
+                }
+
+                Text {
+                    text: "常规与唤醒";
+                    color: #71818e;
+                    font-size: 12px;
+                }
+            }
+
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                border-radius: 9px;
+                background: close-touch.has-hover ? #e2eaf0 : transparent;
+
+                Text {
+                    text: "×";
+                    color: #536574;
+                    font-size: 22px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                close-touch := TouchArea {
+                    clicked => { root.close-settings(); }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: #dce5ec;
+        }
+
+        VerticalLayout {
+            spacing: 10px;
+
+            Text {
+                text: "启动";
+                color: #176b87;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            Rectangle {
+                height: 72px;
+                border-radius: 12px;
+                background: #edf4f7;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+
+                    VerticalLayout {
+                        spacing: 3px;
+
+                        Text {
+                            text: "登录后自动启动";
+                            color: #203442;
+                            font-size: 14px;
+                            font-weight: 600;
+                        }
+
+                        Text {
+                            text: "在 Deepin / UOS 桌面会话中常驻托盘";
+                            color: #71818e;
+                            font-size: 11px;
+                        }
+                    }
+
+                    CheckBox {
+                        text: "启用";
+                        checked <=> root.launch-at-login;
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 10px;
+
+            Text {
+                text: "全局唤醒";
+                color: #176b87;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            Rectangle {
+                height: 72px;
+                border-radius: 12px;
+                background: #edf4f7;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+
+                    VerticalLayout {
+                        spacing: 3px;
+
+                        Text {
+                            text: "双击 Ctrl 呼出搜索框";
+                            color: #203442;
+                            font-size: 14px;
+                            font-weight: 600;
+                        }
+
+                        Text {
+                            text: "X11 下监听原始按键，但不会抓取或吞键";
+                            color: #71818e;
+                            font-size: 11px;
+                        }
+                    }
+
+                    CheckBox {
+                        text: "启用";
+                        checked <=> root.double-ctrl-enabled;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 72px;
+                border-radius: 12px;
+                background: #edf4f7;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+
+                    VerticalLayout {
+                        spacing: 3px;
+
+                        Text {
+                            text: "全屏时暂停唤醒";
+                            color: #203442;
+                            font-size: 14px;
+                            font-weight: 600;
+                        }
+
+                        Text {
+                            text: "避免游戏、演示和视频播放时误触发";
+                            color: #71818e;
+                            font-size: 11px;
+                        }
+                    }
+
+                    CheckBox {
+                        text: "启用";
+                        checked <=> root.suppress-in-fullscreen;
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            height: 42px;
+
+            Text {
+                text: root.status-text;
+                color: #71818e;
+                font-size: 11px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Button {
+                width: 108px;
+                text: "保存设置";
+                clicked => {
+                    root.save-settings(
+                        root.launch-at-login,
+                        root.double-ctrl-enabled,
+                        root.suppress-in-fullscreen
+                    );
+                }
+            }
+        }
+    }
+}
+
 export component LauncherWindow inherits Window {
     callback query-edited(string);
     callback activate-result(int);
     callback dismiss();
+    callback save-settings(bool, bool, bool);
+    callback close-settings();
 
     public function focus-query() {
         query-input.focus();
@@ -20,15 +236,21 @@ export component LauncherWindow inherits Window {
     in property <string> status-text: "正在连接后台服务…";
     in-out property <string> query: "";
     in-out property <int> selected-index: 0;
+    in-out property <bool> settings-mode: false;
+    in-out property <bool> launch-at-login: false;
+    in-out property <bool> double-ctrl-enabled: true;
+    in-out property <bool> suppress-in-fullscreen: true;
+    in property <string> settings-status-text: "修改后点击保存";
 
-    title: "如意寻";
-    width: 720px;
-    height: 122px + Math.min(root.results.length, 9) * 54px;
+    title: root.settings-mode ? "如意寻设置" : "如意寻";
+    width: root.settings-mode ? 640px : 720px;
+    height: root.settings-mode ? 480px : 122px + Math.min(root.results.length, 9) * 54px;
     no-frame: true;
     always-on-top: true;
     background: transparent;
 
     focus-scope := FocusScope {
+        visible: !root.settings-mode;
         key-pressed(event) => {
             if (event.text == Key.DownArrow && root.results.length > 0) {
                 root.selected-index = Math.min(root.selected-index + 1, root.results.length - 1);
@@ -196,6 +418,22 @@ export component LauncherWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    SettingsPanel {
+        visible: root.settings-mode;
+        launch-at-login <=> root.launch-at-login;
+        double-ctrl-enabled <=> root.double-ctrl-enabled;
+        suppress-in-fullscreen <=> root.suppress-in-fullscreen;
+        status-text: root.settings-status-text;
+        close-settings => { root.close-settings(); }
+        save-settings(launch-at-login, double-ctrl-enabled, suppress-in-fullscreen) => {
+            root.save-settings(
+                launch-at-login,
+                double-ctrl-enabled,
+                suppress-in-fullscreen
+            );
         }
     }
 }

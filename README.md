@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-仓库目前完成了阶段 A1 的第三个纵向切片：
+仓库目前完成了阶段 A1 的第四个纵向切片：
 
 - Rust workspace 及 `ruyiseekd`、`ruyiseek-ui`、`ruyi` 三个进程入口；
 - 可独立测试的双击 Ctrl 状态机，覆盖长按、组合键、自动重复和锁屏/全屏抑制；
@@ -18,6 +18,9 @@
 - 通过 systemd-logind `LockedHint` 监听真实锁屏状态，锁屏时抑制全局唤醒；
 - 基于 D-Bus 的 GUI 单实例控制，重复启动会唤醒已有窗口；
 - StatusNotifierItem 系统托盘，支持显示、隐藏和完全退出；
+- 原生设置模式与版本化 TOML 配置，支持损坏回退和原子保存；
+- 登录后自动启动、双击 Ctrl、全屏抑制三个可配置选项，热键设置保存后立即生效；
+- 明确区分退出 UI 与完全退出，完全退出通过本地 IPC 正常停止 daemon；
 - daemon、CLI 与 GUI 之间可运行的端到端查询链路；
 - `--background` 常驻模式，以及 systemd 用户服务、D-Bus 激活和 Deepin XDG Autostart 配置。
 
@@ -63,10 +66,14 @@ cargo run -p ruyiseek-ui -- --background
 ```bash
 cargo run -p ruyiseek-ui -- --toggle
 cargo run -p ruyiseek-ui -- --hide
+cargo run -p ruyiseek-ui -- --settings
+cargo run -p ruyiseek-ui -- --exit-ui
 cargo run -p ruyiseek-ui -- --quit
 ```
 
-托盘遵循 StatusNotifierItem/DBusMenu 协议，在 DDE 支持该协议的托盘区域中显示；左键显示窗口，菜单可隐藏窗口或完全退出后台进程。
+托盘遵循 StatusNotifierItem/DBusMenu 协议，在 DDE 支持该协议的托盘区域中显示；左键显示窗口，菜单可打开设置、隐藏窗口、只退出界面或完全退出。只退出界面会保留索引服务，完全退出会等待 daemon 确认停止后退出 UI。
+
+基础设置保存在 `$XDG_CONFIG_HOME/ruyiseek/config.toml`，未设置该变量时使用 `$HOME/.config/ruyiseek/config.toml`。程序保存时会保留 `config.toml.previous`，并在当前配置损坏时回退。自动启动开关写入用户级 XDG Autostart 文件，只修改带有如意寻管理标记的条目。
 
 自动启动提供两种打包入口：systemd 用户服务和 `packaging/autostart` 下的 Deepin XDG Autostart 文件。安装器应按目标系统选择其中一种；即使用户误启用两种，D-Bus 单实例也会让后启动进程正常退出。锁屏状态无法确认时采取安全关闭策略：保留托盘和搜索，但停用全局双击 Ctrl。
 

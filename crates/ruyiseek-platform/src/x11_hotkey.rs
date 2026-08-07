@@ -42,6 +42,37 @@ impl fmt::Display for HotkeyError {
 
 impl std::error::Error for HotkeyError {}
 
+/// Preferences shared between the settings UI and the X11 listener.
+#[derive(Clone, Debug)]
+pub struct DoubleCtrlControl {
+    enabled: Arc<AtomicBool>,
+    suppress_in_fullscreen: Arc<AtomicBool>,
+}
+
+impl DoubleCtrlControl {
+    #[must_use]
+    pub fn new(enabled: bool, suppress_in_fullscreen: bool) -> Self {
+        Self {
+            enabled: Arc::new(AtomicBool::new(enabled)),
+            suppress_in_fullscreen: Arc::new(AtomicBool::new(suppress_in_fullscreen)),
+        }
+    }
+
+    pub fn update(&self, enabled: bool, suppress_in_fullscreen: bool) {
+        self.suppress_in_fullscreen
+            .store(suppress_in_fullscreen, Ordering::Release);
+        self.enabled.store(enabled, Ordering::Release);
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled.load(Ordering::Acquire)
+    }
+
+    fn suppress_in_fullscreen(&self) -> bool {
+        self.suppress_in_fullscreen.load(Ordering::Acquire)
+    }
+}
+
 /// Start a worker that observes `XInput2` raw keyboard events.
 ///
 /// # Errors
@@ -49,6 +80,7 @@ impl std::error::Error for HotkeyError {}
 /// Returns [`HotkeyError`] if X11/XInput2 setup fails or the worker cannot be spawned.
 pub fn spawn_double_ctrl_listener<Callback>(
     session_locked: Arc<AtomicBool>,
+    control: DoubleCtrlControl,
     on_trigger: Callback,
 ) -> Result<JoinHandle<()>, HotkeyError>
 where
@@ -99,6 +131,7 @@ where
                 keymap,
                 &atoms,
                 &session_locked,
+                &control,
                 &on_trigger,
             );
         })
@@ -111,6 +144,7 @@ fn run_event_loop<Callback>(
     mut keymap: KeyMap,
     atoms: &FullscreenAtoms,
     session_locked: &AtomicBool,
+    control: &DoubleCtrlControl,
     on_trigger: &Callback,
 ) where
     Callback: Fn(),
@@ -130,7 +164,8 @@ fn run_event_loop<Callback>(
 
         let native_event = match event {
             Event::XinputRawKeyPress(event) => {
-                fullscreen_blocked = atoms.is_fullscreen(connection, root).unwrap_or(false);
+                fullscreen_blocked = control.suppress_in_fullscreen()
+                    && atoms.is_fullscreen(connection, root).unwrap_or(false);
                 Some(to_key_event(&keymap, &event, KeyState::Pressed, started))
             }
             Event::XinputRawKeyRelease(event) => {
@@ -150,7 +185,7 @@ fn run_event_loop<Callback>(
             recognizer.handle(
                 event,
                 GestureContext {
-                    session_locked: session_locked.load(Ordering::Acquire),
+                    session_locked: !control.enabled() || session_locked.load(Ordering::Acquire),
                     fullscreen_blocked,
                 },
             ) == GestureDecision::Triggered
@@ -315,5 +350,16 @@ mod tests {
         );
         assert_eq!(classify_keysyms(&[0xffe9]), Key::OtherModifier);
         assert_eq!(classify_keysyms(&[0x61]), Key::NonModifier);
+    }
+
+    #[test]
+    fn hotkey_control_updates_preferences_without_restarting_listener() {
+        let control = DoubleCtrlControl::new(true, true);
+        assert!(control.enabled());
+        assert!(control.suppress_in_fullscreen());
+
+        control.update(false, false);
+        assert!(!control.enabled());
+        assert!(!control.suppress_in_fullscreen());
     }
 }

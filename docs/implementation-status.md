@@ -1,6 +1,6 @@
 # 实现状态
 
-更新时间：2026-08-06
+更新时间：2026-08-07
 
 ## 已完成：阶段 A0——可运行的进程与协议骨架
 
@@ -44,7 +44,18 @@
 - 增加仅面向 Deepin 的 XDG Autostart 文件；安装器可在它与 systemd 用户服务之间二选一。
 - 即使两种自动启动方式被同时启用，A1.2 的 D-Bus 单实例也会让后启动进程成功退出，不形成 systemd 重启循环。
 
-## 下一步：阶段 A1.4——UOS 验收与安装打包
+## 已完成：阶段 A1.4——设置、配置与进程语义闭环
+
+- 增加原生设置模式，可从托盘、D-Bus 或 `ruyiseek-ui --settings` 打开；支持登录后自动启动、双击 Ctrl 和全屏抑制三个基础选项。
+- 配置保存到 `$XDG_CONFIG_HOME/ruyiseek/config.toml`（未设置时使用 `$HOME/.config`），包含显式 `schema_version`，采用临时文件、`fsync` 和同目录原子替换。
+- 保存新配置前保留 `config.toml.previous`；当前文件损坏或版本不受支持时尝试回退上一次有效配置，无法回退才使用默认值。
+- 自动启动设置只管理带 `X-RuyiSeek-Managed=true` 标记的用户 Desktop Entry，不会覆盖或删除同名的外部文件。
+- 双击 Ctrl 与全屏抑制通过原子共享状态立即送入 X11 监听线程，保存设置后不需要重启 UI。
+- 托盘现在明确区分“退出界面（保留后台索引）”与“完全退出如意寻”，并增加设置入口。
+- IPC 增加 `SHUTDOWN` / `ACK`，daemon 回应后以成功状态退出；`ruyi stop` 和 `ruyiseek-ui --quit` 均复用同一协议。
+- D-Bus 增加 `ShowSettings` 和 `ExitUi`；原有 `Quit` 调整为同时停止 UI 与 daemon，修正此前名不副实的行为。
+
+## 下一步：阶段 A1.5——UOS 验收与安装打包
 
 1. 在 Debian 10 / UOS 兼容容器内完成 x86_64 与 aarch64 构建。
 2. 增加托盘、D-Bus 激活、锁屏和窗口焦点的 DDE 实机回归清单。
@@ -58,4 +69,5 @@
 - 还没有在 UOS 实机图形会话中完成窗口、焦点、DDE 合成器和双击 Ctrl 验收。
 - StatusNotifierItem、窗口前置/焦点、D-Bus 激活、锁屏状态和自动启动尚未在 UOS 实机 DDE 会话中验收。
 - Wayland 下全局双击 Ctrl 暂不可用；必须通过 Portal / DDE 的合规接口实现。
+- 设置界面目前只覆盖基础启动与唤醒项，索引范围、排除规则、搜索行为和外观设置将在对应功能落地时补齐。
 - 许可证待仓库所有者决定，当前未擅自添加。

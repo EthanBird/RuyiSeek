@@ -61,7 +61,14 @@ fn spawn_service(
                     sender.clone(),
                     DesktopAction::Toggle,
                 );
-                register_action(builder, "Quit", sender, DesktopAction::Quit);
+                register_action(
+                    builder,
+                    "ShowSettings",
+                    sender.clone(),
+                    DesktopAction::Settings,
+                );
+                register_action(builder, "ExitUi", sender.clone(), DesktopAction::ExitUi);
+                register_action(builder, "Quit", sender, DesktopAction::QuitAll);
             });
             crossroads.insert(OBJECT_PATH, &[interface], ());
 
@@ -90,7 +97,9 @@ fn forward_action(connection: &Connection, action: DesktopAction) -> Result<(), 
         DesktopAction::Show => "ShowLauncher",
         DesktopAction::Hide => "HideLauncher",
         DesktopAction::Toggle => "ToggleLauncher",
-        DesktopAction::Quit => "Quit",
+        DesktopAction::Settings => "ShowSettings",
+        DesktopAction::ExitUi => "ExitUi",
+        DesktopAction::QuitAll => "Quit",
     };
     let proxy = connection.with_proxy(BUS_NAME, OBJECT_PATH, CALL_TIMEOUT);
     proxy.method_call::<(), _, _, _>(INTERFACE, method, ())

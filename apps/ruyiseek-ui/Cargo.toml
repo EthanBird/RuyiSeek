@@ -12,6 +12,7 @@ dbus-crossroads = "=0.5.2"
 ksni = "=0.2.2"
 ruyiseek-ipc = { path = "../../crates/ruyiseek-ipc" }
 ruyiseek-platform = { path = "../../crates/ruyiseek-platform", features = ["x11"] }
+serde = { version = "=1.0.229", features = ["derive"] }
 slint = { version = "=1.6.0", default-features = false, features = [
     "backend-winit-wayland",
     "backend-winit-x11",
@@ -19,6 +20,7 @@ slint = { version = "=1.6.0", default-features = false, features = [
     "renderer-software",
     "std",
 ] }
+toml = "=0.8.11"
 
 [build-dependencies]
 # `ksni` invokes `dbus-codegen` in the host dependency graph. Repeat the vendored feature here so

@@ -91,11 +91,24 @@ impl Tray for RuyiTray {
                 ..Default::default()
             }
             .into(),
+            StandardItem {
+                label: "设置…".to_owned(),
+                icon_name: "preferences-system".to_owned(),
+                activate: Box::new(|tray: &mut Self| tray.dispatch(DesktopAction::Settings)),
+                ..Default::default()
+            }
+            .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "完全退出".to_owned(),
+                label: "退出界面（保留后台索引）".to_owned(),
+                activate: Box::new(|tray: &mut Self| tray.dispatch(DesktopAction::ExitUi)),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "完全退出如意寻".to_owned(),
                 icon_name: "application-exit".to_owned(),
-                activate: Box::new(|tray: &mut Self| tray.dispatch(DesktopAction::Quit)),
+                activate: Box::new(|tray: &mut Self| tray.dispatch(DesktopAction::QuitAll)),
                 ..Default::default()
             }
             .into(),

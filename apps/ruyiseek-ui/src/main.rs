@@ -2,6 +2,7 @@ use ruyiseek_ipc::{default_socket_path, request_daemon, DaemonStatus, Request, R
 use ruyiseek_platform::hotkey::{
     ControlKey, DoubleCtrlRecognizer, GestureContext, GestureDecision, Key, KeyEvent, KeyState,
 };
+use ruyiseek_platform::x11_hotkey::DoubleCtrlControl;
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use std::cell::{Cell, RefCell};
 use std::error::Error;
@@ -18,6 +19,8 @@ mod generated_ui {
 }
 use generated_ui::{LauncherResult, LauncherWindow};
 
+mod autostart;
+mod config;
 mod session_bus;
 mod session_lock;
 mod tray;
@@ -46,16 +49,41 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
         Ok(session_bus::Claim::Forwarded) => return Ok(()),
         Err(error) => {
             eprintln!("ruyiseek-ui: 无法接入桌面会话 D-Bus：{error}");
-            if matches!(mode, LaunchMode::Hide | LaunchMode::Quit) {
+            if matches!(mode, LaunchMode::Hide | LaunchMode::ExitUi) {
                 return Ok(());
             }
             None
         }
     };
 
-    if matches!(mode, LaunchMode::Hide | LaunchMode::Quit) {
-        return Ok(());
+    match mode {
+        LaunchMode::Hide | LaunchMode::ExitUi => return Ok(()),
+        LaunchMode::Quit => {
+            stop_daemon().map_err(|error| format!("无法停止后台服务：{error}"))?;
+            return Ok(());
+        }
+        LaunchMode::Show | LaunchMode::Background | LaunchMode::Toggle | LaunchMode::Settings => {}
     }
+
+    let config_path = match config::default_path() {
+        Ok(path) => Some(path),
+        Err(error) => {
+            eprintln!("ruyiseek-ui: 无法确定配置路径，将使用临时默认配置：{error}");
+            None
+        }
+    };
+    let (loaded_config, config_warning) = config_path.as_ref().map_or_else(
+        || (config::AppConfig::default(), None),
+        |path| config::AppConfig::load_resilient(path),
+    );
+    if let Some(warning) = config_warning {
+        eprintln!("ruyiseek-ui: {warning}");
+    }
+    let hotkey_control = DoubleCtrlControl::new(
+        loaded_config.double_ctrl_enabled,
+        loaded_config.suppress_in_fullscreen,
+    );
+    let app_config = Rc::new(RefCell::new(loaded_config));
 
     let launcher = LauncherWindow::new()?;
     let visible = Rc::new(Cell::new(false));
@@ -68,13 +96,20 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
 
     install_ui_callbacks(
         &launcher,
-        worker_sender,
+        worker_sender.clone(),
         &generation,
         &result_paths,
         Rc::clone(&visible),
     );
+    install_settings_callbacks(
+        &launcher,
+        Rc::clone(&app_config),
+        config_path,
+        hotkey_control.clone(),
+        Rc::clone(&visible),
+    );
 
-    let _hotkey_thread = install_hotkey(&ui_sender);
+    let _hotkey_thread = install_hotkey(&ui_sender, hotkey_control);
     let _tray_guard = match tray::spawn(ui_sender) {
         Ok(guard) => Some(guard),
         Err(error) => {
@@ -88,10 +123,12 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
         generation,
         result_paths,
         Rc::clone(&visible),
+        Rc::clone(&app_config),
+        worker_sender.clone(),
     );
 
     if let Some(action) = mode.action() {
-        apply_desktop_action(&launcher, &visible, action);
+        apply_desktop_action(&launcher, &visible, &app_config, &worker_sender, action);
     }
     slint::run_event_loop_until_quit()?;
     drop(poll_timer);
@@ -167,12 +204,95 @@ fn install_ui_callbacks(
     });
 }
 
+fn install_settings_callbacks(
+    launcher: &LauncherWindow,
+    app_config: Rc<RefCell<config::AppConfig>>,
+    config_path: Option<PathBuf>,
+    hotkey_control: DoubleCtrlControl,
+    visible: Rc<Cell<bool>>,
+) {
+    let weak_launcher = launcher.as_weak();
+    launcher.on_close_settings(move || {
+        let Some(launcher) = weak_launcher.upgrade() else {
+            return;
+        };
+        launcher.set_settings_mode(false);
+        if let Err(error) = launcher.hide() {
+            eprintln!("ruyiseek-ui: 隐藏设置窗口失败：{error}");
+        } else {
+            visible.set(false);
+        }
+    });
+
+    let weak_launcher = launcher.as_weak();
+    launcher.on_save_settings(
+        move |launch_at_login, double_ctrl_enabled, suppress_in_fullscreen| {
+            let Some(launcher) = weak_launcher.upgrade() else {
+                return;
+            };
+            let Some(config_path) = config_path.as_ref() else {
+                launcher.set_settings_status_text("无法确定配置目录，设置未保存".into());
+                return;
+            };
+
+            let previous = app_config.borrow().clone();
+            let next = config::AppConfig {
+                launch_at_login,
+                double_ctrl_enabled,
+                suppress_in_fullscreen,
+                ..previous.clone()
+            };
+            let autostart_changed = previous.launch_at_login != launch_at_login;
+            let autostart_path = match autostart::default_path() {
+                Ok(path) => path,
+                Err(error) => {
+                    launcher.set_settings_status_text(format!("自动启动设置失败：{error}").into());
+                    return;
+                }
+            };
+            let executable = match std::env::current_exe() {
+                Ok(path) => path,
+                Err(error) => {
+                    launcher.set_settings_status_text(format!("无法确定程序路径：{error}").into());
+                    return;
+                }
+            };
+
+            if autostart_changed {
+                if let Err(error) =
+                    autostart::set_enabled(&autostart_path, &executable, launch_at_login)
+                {
+                    launcher.set_settings_status_text(format!("自动启动设置失败：{error}").into());
+                    return;
+                }
+            }
+            if let Err(error) = next.save(config_path) {
+                if autostart_changed {
+                    let _ = autostart::set_enabled(
+                        &autostart_path,
+                        &executable,
+                        previous.launch_at_login,
+                    );
+                }
+                launcher.set_settings_status_text(format!("保存失败：{error}").into());
+                return;
+            }
+
+            hotkey_control.update(double_ctrl_enabled, suppress_in_fullscreen);
+            *app_config.borrow_mut() = next;
+            launcher.set_settings_status_text("设置已保存并立即生效".into());
+        },
+    );
+}
+
 fn install_ui_event_pump(
     launcher: &LauncherWindow,
     ui_receiver: Receiver<UiEvent>,
     generation: Rc<Cell<u64>>,
     result_paths: Rc<RefCell<Vec<PathBuf>>>,
     visible: Rc<Cell<bool>>,
+    app_config: Rc<RefCell<config::AppConfig>>,
+    worker_sender: Sender<WorkerCommand>,
 ) -> Timer {
     let timer = Timer::default();
     let weak_launcher = launcher.as_weak();
@@ -200,7 +320,15 @@ fn install_ui_event_pump(
                         launcher.set_status_text(error.into());
                     }
                 },
-                UiEvent::Desktop(action) => apply_desktop_action(&launcher, &visible, action),
+                UiEvent::Desktop(action) => {
+                    apply_desktop_action(&launcher, &visible, &app_config, &worker_sender, action);
+                }
+                UiEvent::Shutdown(Ok(())) => quit_ui(),
+                UiEvent::Shutdown(Err(error)) => {
+                    eprintln!("ruyiseek-ui: 完全退出时停止后台服务失败：{error}");
+                    show_launcher(&launcher, &visible);
+                    launcher.set_status_text(format!("后台停止失败，尚未退出：{error}").into());
+                }
                 UiEvent::HotkeyIssue(message) if launcher.get_query().trim().is_empty() => {
                     launcher.set_status_text(message.into());
                 }
@@ -237,7 +365,13 @@ fn apply_search_results(
     }
 }
 
-fn apply_desktop_action(launcher: &LauncherWindow, visible: &Cell<bool>, action: DesktopAction) {
+fn apply_desktop_action(
+    launcher: &LauncherWindow,
+    visible: &Cell<bool>,
+    app_config: &RefCell<config::AppConfig>,
+    worker_sender: &Sender<WorkerCommand>,
+    action: DesktopAction,
+) {
     match action {
         DesktopAction::Show => show_launcher(launcher, visible),
         DesktopAction::Hide => hide_launcher(launcher, visible),
@@ -248,15 +382,45 @@ fn apply_desktop_action(launcher: &LauncherWindow, visible: &Cell<bool>, action:
                 show_launcher(launcher, visible);
             }
         }
-        DesktopAction::Quit => {
-            if let Err(error) = slint::quit_event_loop() {
-                eprintln!("ruyiseek-ui: 无法退出事件循环：{error}");
+        DesktopAction::Settings => show_settings(launcher, visible, app_config),
+        DesktopAction::ExitUi => quit_ui(),
+        DesktopAction::QuitAll => {
+            hide_launcher(launcher, visible);
+            if worker_sender.send(WorkerCommand::Shutdown).is_err() {
+                eprintln!("ruyiseek-ui: 后台控制线程已经停止");
+                show_launcher(launcher, visible);
+                launcher.set_status_text("后台控制线程异常，尚未退出".into());
             }
         }
     }
 }
 
+fn show_settings(
+    launcher: &LauncherWindow,
+    visible: &Cell<bool>,
+    app_config: &RefCell<config::AppConfig>,
+) {
+    let config = app_config.borrow();
+    launcher.set_launch_at_login(config.launch_at_login);
+    launcher.set_double_ctrl_enabled(config.double_ctrl_enabled);
+    launcher.set_suppress_in_fullscreen(config.suppress_in_fullscreen);
+    launcher.set_settings_status_text("修改后点击保存".into());
+    launcher.set_settings_mode(true);
+    if let Err(error) = launcher.show() {
+        eprintln!("ruyiseek-ui: 显示设置窗口失败：{error}");
+    } else {
+        visible.set(true);
+    }
+}
+
+fn quit_ui() {
+    if let Err(error) = slint::quit_event_loop() {
+        eprintln!("ruyiseek-ui: 无法退出事件循环：{error}");
+    }
+}
+
 fn show_launcher(launcher: &LauncherWindow, visible: &Cell<bool>) {
+    launcher.set_settings_mode(false);
     match launcher.show() {
         Ok(()) => {
             visible.set(true);
@@ -345,6 +509,7 @@ fn run_worker_command(command: WorkerCommand) -> UiEvent {
             });
             UiEvent::Search { generation, result }
         }
+        WorkerCommand::Shutdown => UiEvent::Shutdown(stop_daemon()),
     }
 }
 
@@ -353,7 +518,10 @@ struct HotkeyRuntime {
     _lock_monitor: session_lock::Monitor,
 }
 
-fn install_hotkey(ui_sender: &Sender<UiEvent>) -> Option<HotkeyRuntime> {
+fn install_hotkey(
+    ui_sender: &Sender<UiEvent>,
+    control: DoubleCtrlControl,
+) -> Option<HotkeyRuntime> {
     if std::env::var("XDG_SESSION_TYPE").is_ok_and(|value| value.eq_ignore_ascii_case("wayland")) {
         let _ = ui_sender.send(UiEvent::HotkeyIssue(
             "Wayland 会话暂不监听修饰键；可从应用菜单打开".to_owned(),
@@ -375,6 +543,7 @@ fn install_hotkey(ui_sender: &Sender<UiEvent>) -> Option<HotkeyRuntime> {
     let trigger_sender = ui_sender.clone();
     match ruyiseek_platform::x11_hotkey::spawn_double_ctrl_listener(
         lock_monitor.state(),
+        control,
         move || {
             let _ = trigger_sender.send(UiEvent::Desktop(DesktopAction::Toggle));
         },
@@ -389,6 +558,20 @@ fn install_hotkey(ui_sender: &Sender<UiEvent>) -> Option<HotkeyRuntime> {
             None
         }
     }
+}
+
+fn stop_daemon() -> Result<(), String> {
+    let socket = default_socket_path();
+    if !socket.exists() {
+        return Ok(());
+    }
+    request_daemon(&socket, &Request::Shutdown, DAEMON_TIMEOUT)
+        .map_err(connection_message)
+        .and_then(|response| match response {
+            Response::Acknowledged => Ok(()),
+            Response::Error(message) => Err(message),
+            _ => Err("后台服务返回了意外的停止响应".to_owned()),
+        })
 }
 
 fn open_path(path: &PathBuf) -> Result<(), Box<dyn Error>> {
@@ -420,6 +603,7 @@ fn status_message(status: &DaemonStatus) -> String {
 enum WorkerCommand {
     Status,
     Search { generation: u64, query: String },
+    Shutdown,
 }
 
 enum UiEvent {
@@ -428,6 +612,7 @@ enum UiEvent {
         generation: u64,
         result: Result<Vec<SearchResult>, String>,
     },
+    Shutdown(Result<(), String>),
     Desktop(DesktopAction),
     HotkeyIssue(String),
 }
@@ -437,7 +622,9 @@ enum DesktopAction {
     Show,
     Hide,
     Toggle,
-    Quit,
+    Settings,
+    ExitUi,
+    QuitAll,
 }
 
 struct SearchResult {
@@ -454,6 +641,8 @@ enum LaunchMode {
     Background,
     Toggle,
     Hide,
+    Settings,
+    ExitUi,
     Quit,
 }
 
@@ -464,7 +653,9 @@ impl LaunchMode {
             Self::Background => None,
             Self::Toggle => Some(DesktopAction::Toggle),
             Self::Hide => Some(DesktopAction::Hide),
-            Self::Quit => Some(DesktopAction::Quit),
+            Self::Settings => Some(DesktopAction::Settings),
+            Self::ExitUi => Some(DesktopAction::ExitUi),
+            Self::Quit => Some(DesktopAction::QuitAll),
         }
     }
 }
@@ -484,6 +675,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Options, Box<dyn Err
             "--background" => set_mode(&mut explicit_mode, LaunchMode::Background)?,
             "--toggle" => set_mode(&mut explicit_mode, LaunchMode::Toggle)?,
             "--hide" => set_mode(&mut explicit_mode, LaunchMode::Hide)?,
+            "--settings" => set_mode(&mut explicit_mode, LaunchMode::Settings)?,
+            "--exit-ui" => set_mode(&mut explicit_mode, LaunchMode::ExitUi)?,
             "--quit" => set_mode(&mut explicit_mode, LaunchMode::Quit)?,
             "--demo-double-ctrl" => options.demo_double_ctrl = true,
             "-h" | "--help" => options.help = true,
@@ -531,7 +724,7 @@ const fn key_event(milliseconds: u64, state: KeyState) -> KeyEvent {
 
 fn print_help() {
     println!(
-        "ruyiseek-ui {version}\n\n用法：\n    ruyiseek-ui [--background | --toggle | --hide | --quit]\n    ruyiseek-ui --demo-double-ctrl\n\n选项：\n    --background        隐藏启动并注册托盘、热键与 D-Bus 服务\n    --toggle            显示或隐藏已运行的搜索窗口\n    --hide              隐藏已运行的搜索窗口\n    --quit              完全退出已运行的如意寻界面进程\n    --demo-double-ctrl  运行手势状态机演示\n    -h, --help          显示帮助",
+        "ruyiseek-ui {version}\n\n用法：\n    ruyiseek-ui [--background | --toggle | --hide | --settings | --exit-ui | --quit]\n    ruyiseek-ui --demo-double-ctrl\n\n选项：\n    --background        隐藏启动并注册托盘、热键与 D-Bus 服务\n    --toggle            显示或隐藏已运行的搜索窗口\n    --hide              隐藏已运行的搜索窗口\n    --settings          打开设置窗口\n    --exit-ui           退出界面，保留后台索引服务\n    --quit              完全退出界面与后台索引服务\n    --demo-double-ctrl  运行手势状态机演示\n    -h, --help          显示帮助",
         version = env!("CARGO_PKG_VERSION")
     );
 }
@@ -559,6 +752,8 @@ mod tests {
             ("--background", LaunchMode::Background),
             ("--toggle", LaunchMode::Toggle),
             ("--hide", LaunchMode::Hide),
+            ("--settings", LaunchMode::Settings),
+            ("--exit-ui", LaunchMode::ExitUi),
             ("--quit", LaunchMode::Quit),
         ] {
             assert_eq!(parse_args(args(&[argument])).unwrap().mode, expected);

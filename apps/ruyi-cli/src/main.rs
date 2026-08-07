@@ -16,6 +16,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn print_response(response: Response) -> Result<(), Box<dyn Error>> {
     match response {
+        Response::Acknowledged => println!("ruyiseekd acknowledged the request"),
         Response::Pong { protocol_version } => {
             println!("ruyiseekd online (protocol {protocol_version})");
         }
@@ -67,13 +68,14 @@ fn parse_args(
     let request = match positional.first().map(String::as_str) {
         Some("ping") if positional.len() == 1 => Request::Ping,
         Some("status") if positional.len() == 1 => Request::Status,
+        Some("stop") if positional.len() == 1 => Request::Shutdown,
         Some("search") if positional.len() > 1 => Request::Search {
             query: positional[1..].join(" "),
             limit,
         },
         _ => {
             print_help();
-            return Err("expected ping, status, or search QUERY".into());
+            return Err("expected ping, status, stop, or search QUERY".into());
         }
     };
     Ok(Some((socket, request)))
@@ -89,7 +91,7 @@ fn next_value(
 
 fn print_help() {
     println!(
-        "ruyi {version}\n\nUSAGE:\n    ruyi [--socket PATH] ping\n    ruyi [--socket PATH] status\n    ruyi [--socket PATH] [--limit N] search QUERY",
+        "ruyi {version}\n\nUSAGE:\n    ruyi [--socket PATH] ping\n    ruyi [--socket PATH] status\n    ruyi [--socket PATH] stop\n    ruyi [--socket PATH] [--limit N] search QUERY",
         version = env!("CARGO_PKG_VERSION")
     );
 }

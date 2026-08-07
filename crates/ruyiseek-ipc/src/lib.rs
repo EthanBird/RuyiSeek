@@ -15,11 +15,13 @@ pub const MAX_FRAME_SIZE: usize = 1024 * 1024;
 pub enum Request {
     Ping,
     Status,
+    Shutdown,
     Search { query: String, limit: usize },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Response {
+    Acknowledged,
     Pong {
         protocol_version: u16,
     },
@@ -140,6 +142,7 @@ pub fn encode_request(request: &Request) -> Vec<u8> {
     match request {
         Request::Ping => b"PING".to_vec(),
         Request::Status => b"STATUS".to_vec(),
+        Request::Shutdown => b"SHUTDOWN".to_vec(),
         Request::Search { query, limit } => {
             format!("SEARCH\t{limit}\t{}", encode_bytes(query.as_bytes())).into_bytes()
         }
@@ -157,6 +160,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request, ProtocolError> {
     match fields.next().ok_or(ProtocolError::EmptyMessage)? {
         "PING" if fields.next().is_none() => Ok(Request::Ping),
         "STATUS" if fields.next().is_none() => Ok(Request::Status),
+        "SHUTDOWN" if fields.next().is_none() => Ok(Request::Shutdown),
         "SEARCH" => {
             let limit = parse(fields.next())?;
             if limit > 1_000 {
@@ -175,6 +179,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request, ProtocolError> {
 #[must_use]
 pub fn encode_response(response: &Response) -> Vec<u8> {
     match response {
+        Response::Acknowledged => b"ACK".to_vec(),
         Response::Pong { protocol_version } => format!("PONG\t{protocol_version}").into_bytes(),
         Response::Status(status) => format!(
             "STATUS\t{}\t{}\t{}",
@@ -216,6 +221,10 @@ pub fn decode_response(bytes: &[u8]) -> Result<Response, ProtocolError> {
     let header = lines.next().ok_or(ProtocolError::EmptyMessage)?;
     let mut fields = header.split('\t');
     match fields.next().ok_or(ProtocolError::EmptyMessage)? {
+        "ACK" => {
+            ensure_end(&mut fields)?;
+            Ok(Response::Acknowledged)
+        }
         "PONG" => Ok(Response::Pong {
             protocol_version: parse_exactly_one(fields)?,
         }),
@@ -461,6 +470,19 @@ mod tests {
         assert_eq!(
             decode_request(&encode_request(&request)).expect("decode request"),
             request
+        );
+    }
+
+    #[test]
+    fn shutdown_and_acknowledgement_round_trip() {
+        assert_eq!(
+            decode_request(&encode_request(&Request::Shutdown)).expect("decode shutdown"),
+            Request::Shutdown
+        );
+        assert_eq!(
+            decode_response(&encode_response(&Response::Acknowledged))
+                .expect("decode acknowledgement"),
+            Response::Acknowledged
         );
     }
 

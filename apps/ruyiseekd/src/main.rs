@@ -56,10 +56,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(mut stream) => {
                 stream.set_read_timeout(Some(CLIENT_TIMEOUT))?;
                 stream.set_write_timeout(Some(CLIENT_TIMEOUT))?;
-                if let Err(error) = serve(&mut stream, &engine, &status) {
-                    eprintln!("ruyiseekd: client request failed: {error}");
-                }
-                if config.once {
+                let directive = match serve(&mut stream, &engine, &status) {
+                    Ok(directive) => directive,
+                    Err(error) => {
+                        eprintln!("ruyiseekd: client request failed: {error}");
+                        ServerDirective::Continue
+                    }
+                };
+                if config.once || directive == ServerDirective::Shutdown {
                     break;
                 }
             }
@@ -73,25 +77,41 @@ fn serve<Stream: Read + Write>(
     stream: &mut Stream,
     engine: &SearchEngine,
     status: &DaemonStatus,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<ServerDirective, Box<dyn Error>> {
     let payload = read_frame(stream)?;
-    let response = match decode_request(&payload) {
-        Ok(Request::Ping) => Response::Pong {
-            protocol_version: PROTOCOL_VERSION,
-        },
-        Ok(Request::Status) => Response::Status(status.clone()),
+    let (response, directive) = match decode_request(&payload) {
+        Ok(Request::Ping) => (
+            Response::Pong {
+                protocol_version: PROTOCOL_VERSION,
+            },
+            ServerDirective::Continue,
+        ),
+        Ok(Request::Status) => (Response::Status(status.clone()), ServerDirective::Continue),
+        Ok(Request::Shutdown) => (Response::Acknowledged, ServerDirective::Shutdown),
         Ok(Request::Search { query, limit }) => {
             let started = Instant::now();
             let hits = engine.search(&query, limit);
-            Response::Search {
-                elapsed_us: u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
-                hits,
-            }
+            (
+                Response::Search {
+                    elapsed_us: u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
+                    hits,
+                },
+                ServerDirective::Continue,
+            )
         }
-        Err(error) => Response::Error(error.to_string()),
+        Err(error) => (
+            Response::Error(error.to_string()),
+            ServerDirective::Continue,
+        ),
     };
     write_frame(stream, &encode_response(&response))?;
-    Ok(())
+    Ok(directive)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ServerDirective {
+    Continue,
+    Shutdown,
 }
 
 fn bind_single_instance(socket: &Path) -> io::Result<UnixListener> {
@@ -253,7 +273,10 @@ mod tests {
             truncated: false,
         };
 
-        serve(&mut stream, &fixture_engine(), &status).expect("serve search request");
+        assert_eq!(
+            serve(&mut stream, &fixture_engine(), &status).expect("serve search request"),
+            ServerDirective::Continue
+        );
         let response = decode_response(
             &read_frame(&mut Cursor::new(stream.output)).expect("read framed response"),
         )
@@ -280,11 +303,34 @@ mod tests {
             skipped_paths: 0,
             truncated: false,
         };
-        serve(&mut stream, &fixture_engine(), &status).expect("serve malformed request");
+        assert_eq!(
+            serve(&mut stream, &fixture_engine(), &status).expect("serve malformed request"),
+            ServerDirective::Continue
+        );
         let response = decode_response(
             &read_frame(&mut Cursor::new(stream.output)).expect("read framed response"),
         )
         .expect("decode response");
         assert!(matches!(response, Response::Error(_)));
+    }
+
+    #[test]
+    fn shutdown_is_acknowledged_and_stops_the_accept_loop() {
+        let mut stream = stream_for(&Request::Shutdown);
+        let status = DaemonStatus {
+            indexed_items: 1,
+            skipped_paths: 0,
+            truncated: false,
+        };
+
+        assert_eq!(
+            serve(&mut stream, &fixture_engine(), &status).expect("serve shutdown request"),
+            ServerDirective::Shutdown
+        );
+        let response = decode_response(
+            &read_frame(&mut Cursor::new(stream.output)).expect("read framed response"),
+        )
+        .expect("decode response");
+        assert_eq!(response, Response::Acknowledged);
     }
 }
