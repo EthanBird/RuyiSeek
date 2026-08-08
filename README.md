@@ -26,6 +26,7 @@
 - 单文件 `.deb` 安装包（`dist/ruyiseek_<版本>_amd64.deb`），混合 musl/gnu 构建，`apt install ./xxx.deb` 即可；
 - UI 自动 fork daemon：未检测到运行中的 `ruyiseekd` 时自行拉起，关 UI 不带走 daemon；
 - 方向键导航（v0.1.0-6）：在 XInput2 raw stream 上拦截 ↑↓←→ 并回灌 `selected-index`，解决 Slint 1.6 把方向键交给 LineEdit 内部 TextInput、导致父级 key-pressed 看不到的问题。
+- 右键上下文菜单（v0.1.0-8）：每个结果行右键弹出「打开 / 打开所在文件夹 / 复制文件 / 复制路径」四项；Slint 1.6 不暴露 `PopupMenu` / `MenuItem` / `MouseArea`，菜单用手写 Rectangle + TouchArea 实现，位置由 `popup-index` 驱动。复制通过 `xclip` / `wl-copy` 完成，按 `XDG_SESSION_TYPE` 选择主用工具。
 
 持久化增量索引仍在后续迭代中。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口、搜索、单实例与托盘可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
 
@@ -43,9 +44,9 @@ cargo test --workspace
 单文件 `.deb` 已自带所有运行时库依赖（`libc6`、`libgcc1`、`libx11-6` 等标准 GUI 栈），在统信 UOS 20 / Deepin / Debian 10+ 主机上直接装：
 
 ```bash
-sudo apt install ./dist/ruyiseek_0.1.0-7_amd64.deb
+sudo apt install ./dist/ruyiseek_0.1.0-8_amd64.deb
 # 或
-sudo dpkg -i dist/ruyiseek_0.1.0-7_amd64.deb
+sudo dpkg -i dist/ruyiseek_0.1.0-8_amd64.deb
 ```
 
 无需 `apt-get -f install`，也无需先编译。装完后登录桌面，托盘自动出现；双击 Ctrl 唤起启动器，回车打开搜索项。如需重新构建产物：

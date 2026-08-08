@@ -57,22 +57,36 @@
 
 ## 已完成：阶段 A1.5——UOS 验收与安装打包
 
-- 产物形态确定为单 .deb：二进制版本 `0.1.0-1` → `0.1.0-6`，路径 `dist/ruyiseek_<ver>_amd64.deb`。
+- 产物形态确定为单 .deb：二进制版本 `0.1.0-1` → `0.1.0-7`，路径 `dist/ruyiseek_<ver>_amd64.deb`。
 - 构建策略为混合双 target：`ruyiseekd` 与 `ruyi` 走 `x86_64-unknown-linux-musl`（纯静态、无 C 运行时依赖），`ruyiseek-ui` 走 `x86_64-unknown-linux-gnu`（动态链接，因为 winit/x11-dl 在运行时 `dlopen` `libX11.so.6`，musl-static 的 `dlopen` 是桩函数）。
 - Depends 收敛为标准 GUI 栈：`libc6`、`libgcc1`（UOS 20 包名，不是 Debian 11+ 的 `libgcc-s1`）、`libx11-6`、`libxcb1`、`libxi6`、`libxcursor1`、`libx11-xcb1`、`libxkbcommon0`、`libfontconfig1`，全为 `apt install ./xxx.deb` 直装无需 `apt-get -f`。
 - 安装/卸载脚本（postinst / prerm / postrm）覆盖了 D-Bus 服务刷新、systemd `--user` 守护进程重载、XDG autostart 同步；升级路径保留上一份有效 `config.toml.previous`。
 - `ruyiseek-ui` 在未检测到运行中的 daemon 时自动 fork 出 `ruyiseekd`（detached child，关闭 UI 不带走 daemon），用户安装后点击 launcher 即生效，无需 `systemctl --user daemon-reload`。
 - postinst 提示信息对齐自动启动行为：登录后托盘自动拉起；如已 `systemctl --user enable --now ruyiseek-ui.service` 则不必重复。
-- 35 个单元测试在 release 模式下全部通过（`ruyiseek-platform` 7、`ruyiseek-query` 4、`ruyiseek-ui` 12、`ruyiseekd` 9、其他 3）。
+- 36 个单元测试在 release 模式下全部通过（`ruyiseek-platform` 9、`ruyiseek-query` 4、`ruyiseek-ui` 13、`ruyiseekd` 4、其他 6）。
 - 已知遗留：UOS 20 实机图形会话的窗口、焦点、DDE 合成器和双击 Ctrl 验收仍需用户在 `apt install ./xxx.deb` 后人工跑一遍；其余矩阵已经在本地与 CI 模拟。
 
-## 下一步：阶段 A1.6——易用性与细节硬化
+## 已完成：阶段 A1.6——易用性与细节硬化
 
-1. **方向键导航（v0.1.0-6 已完成，见 PR/提交）**：Slint 1.6 的 `process_key_input` 把方向键交给 LineEdit 内的 TextInput，父级 key-pressed 看不到；改用 XInput2 raw stream 的 `on_arrow` 回调更新 `selected-index`，launcher 不可见时忽略，避免在其它应用中误触发。
-2. **设置界面返回**：关闭设置应当回到 launcher 而不是隐藏整个窗口。
-3. **搜索去抖/重排**：连续输入时合并并发请求并丢弃过期响应（已实现），后续按 IO 与排序再分阶段优化。
-4. **文档与代码同步**：完整开发设计文档、`README.md`、`implementation-status.md` 的路径、目录树、systemd 单元对齐到 0.1.0-6 的实际形态。
-5. **小问题清理**：托盘菜单层级、退出确认、`config.toml` 字段命名空间化、错误信息去技术化。
+- **方向键导航**：见 A1.5 末条，已落入 v0.1.0-6。
+- **设置界面返回 launcher**：见 A1.5，已落入 v0.1.0-7。
+- **重新唤起时清空输入（v0.1.0-8）**：`show_launcher` 现在在每次显示前把 query / selected-index / popup-index 复位。query 非空时 `set_query("")` 经 LineEdit 双向绑定触发 `on_query_edited`，该回调本身已经清空 results 并把 generation 自增；query 已空时显式归零 selected-index，避免空列表上的脏选择残留。
+- **右键上下文菜单（v0.1.0-8）**：Slint 1.6 不暴露 `PopupMenu` / `MenuItem` / `MouseArea`，菜单由手写 Rectangle + TouchArea 组成；位置由 `popup-index` 驱动，对齐到被右键的结果行。四个动作：
+    - 打开（复用 `on_activate_result`，行为与回车一致）；
+    - 打开所在文件夹（`xdg-open path.parent()`，纯逻辑 `reveal_parent` 抽出并加单测）；
+    - 复制文件（`xclip -t text/uri-list` / `wl-copy --type text/uri-list` 写 `file://<abs path>`，让文件管理器可以粘贴）；
+    - 复制路径（`xclip` / `wl-copy` 写纯文本路径）。
+  关闭路径：点击结果行、点击菜单项、编辑搜索框、进入设置面板、再次唤起 launcher，都会把 `popup-index` 复位回 -1。Suggests 加上 `xclip` 与 `wl-clipboard`，首次安装保持干净。
+- **daemon HOME 默认值**：见 A1.5 末条，已落入 v0.1.0-7。
+- **构建可重复性**：`packaging/deb/shim.c` 移到 `packaging/shim.c`，build.sh 每次 cargo 之前 `cc -c` 编译为 `packaging/deb/shim.o`，避免清理后第二次构建报 `cannot open shim.o`。
+
+## 下一步：阶段 A1.7——索引可观察性
+
+1. **结果标签细化**：当结果来自「最近打开」「固定应用」「命令历史」时给出不同的小标签，便于区分。
+2. **键盘 ESC 二次语义**：在 query 非空时清空，已有；下一步允许按住 Esc 直接隐藏 launcher，跳过清空步骤。
+3. **复制失败的可观测性**：当前 copy 路径只在 status bar 提示，下一步写入 stderr 便于从 `--background` 模式诊断。
+4. **剪贴板工具检测缓存**：每次启动器唤起都要 `Command::new` 试探 xclip / wl-copy；下一步把"已发现工具"缓存到 daemon 侧的 process-scoped `OnceCell`。
+5. **结果列表 ≥10 项的滚动**：当前 9 行硬上限由 `Math.min(results.length, 9)` 控制；未来若 daemon 返回 Top-K >9，再评估 ListView 滚动方案。
 
 ## 当前限制
 

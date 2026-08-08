@@ -1,5 +1,5 @@
 Package: ruyiseek
-Version: 0.1.0-7
+Version: 0.1.0-8
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -9,7 +9,7 @@ Vcs-Browser: https://github.com/EthanBird/RuyiSeek
 Vcs-Git: https://github.com/EthanBird/RuyiSeek.git
 Depends: libc6, libgcc1, libx11-6, libxcb1, libxi6, libxcursor1, libx11-xcb1, libxkbcommon0, libfontconfig1
 Recommends: systemd
-Suggests: xdg-utils, libdbus-1-3
+Suggests: xdg-utils, libdbus-1-3, xclip, wl-clipboard
 Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  如意寻（RuyiSeek）是面向统信 UOS 与 Deepin（DDE）桌面的常驻本地
  文件搜索与全局启动器，提供双击 Ctrl 呼出、应用与文件统一搜索、
@@ -31,4 +31,4 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  因此 `ruyiseek-ui` 需要运行时存在 libc6 / libgcc1 与若干 X11 库；
  `ruyi` 与 `ruyiseekd` 不依赖这些。安装路径只需 `dpkg -i ./xxx.deb`
  或 `apt install ./xxx.deb`，无需 `apt-get -f`。
-Installed-Size: 13152
+Installed-Size: 13212

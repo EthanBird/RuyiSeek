@@ -1,3 +1,50 @@
+ruyiseek (0.1.0-8) unstable; urgency=medium
+
+  * Right-click context menu on result rows. Slint 1.6 does not expose
+    PopupMenu / MenuItem / MouseArea (they are not part of
+    std-widgets.slint and only MouseArea-like surface is the
+    PointerEventButton enum used internally by TouchArea's
+    pointer-event), so the menu is hand-rolled: each menu item is a
+    Rectangle + TouchArea pair, the wrapper is a Rectangle positioned
+    by popup-index so it lines up with the row that was clicked,
+    and right-button up events on a result row set popup-index +
+    selected-index without triggering the normal activate callback.
+  * Four actions:
+      - 打开           re-uses the existing activate handler (xdg-open);
+      - 打开所在文件夹  reveals the parent directory in the user's
+                       default file manager via xdg-open on
+                       path.parent() (fallback "/" when parent is
+                       empty). The reveal_parent helper is unit-tested.
+      - 复制文件       puts file://<abs path> onto the clipboard as
+                       text/uri-list so file managers can paste it.
+                       Picks xclip on X11, wl-copy on Wayland, and
+                       falls back to the other tool if the preferred
+                       one is missing.
+      - 复制路径       puts the absolute path string onto the clipboard
+                       as plain text. Same xclip / wl-copy selection
+                       and fallback logic.
+    All copy operations report success or failure in the launcher's
+    status bar so the user gets immediate feedback instead of a silent
+    no-op when neither clipboard tool is installed.
+  * Dismissal: clicking a result row, clicking a menu item, or editing
+    the search input all reset popup-index to -1. Entering settings
+    mode also resets popup-index and the menu Rectangle additionally
+    binds its visible to !settings-mode so it cannot leak through the
+    panel.
+  * Bug fix: re-summoning the launcher (double-Ctrl, tray Show,
+    --toggle) now clears the previous query and result list, so the
+    second invocation always starts on an empty input. The reset
+    happens in show_launcher: if query is non-empty, set_query("")
+    triggers on_query_edited which already clears results, bumps
+    the search-response generation, and zeroes selected-index; if
+    query is already empty, selected-index is reset directly so a
+    stale selection cannot survive across toggles.
+  * Packaging: Suggests adds xclip and wl-clipboard so users who want
+    the copy actions get a one-line `apt install xclip` suggestion
+    without it being pulled in by default.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sat, 08 Aug 2026 23:40:00 +0000
+
 ruyiseek (0.1.0-7) unstable; urgency=medium
 
   * UI: closing the settings window now returns to the launcher instead of
