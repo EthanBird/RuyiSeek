@@ -1,3 +1,25 @@
+ruyiseek (0.1.0-3) unstable; urgency=medium
+
+  * Revert the fully-static musl build for ruyiseek-ui. Musl's libc.a
+    ships a stub dlopen that returns "Dynamic loading not supported"
+    without issuing any syscall, so x11-dl (and therefore winit's X11
+    backend) cannot load libX11.so.6 at runtime on a fully static
+    binary. Verified by strace showing zero openat() calls for any .so
+    on a musl-static build and by disassembling dlopen.lo in
+    libc.a (weak_alias(stub_dlopen, dlopen)).
+  * Switch to a hybrid build: ruyi-cli and ruyiseekd are now built for
+    x86_64-unknown-linux-musl (no C runtime deps), while ruyiseek-ui
+    is built for x86_64-unknown-linux-gnu so glibc's real dlopen
+    resolves libX11.so.6 via ldconfig on the host.
+  * Drop Depends: libgcc-s1 -- the UOS 20 / DDE apt repo renames it
+    back to libgcc1 (libgcc-s1 has no candidate). Both names provide
+    the same libgcc_s.so.1 file at /lib/x86_64-linux-gnu/.
+  * Final Depends: libc6, libgcc1, libx11-6, libxcb1, libxi6,
+    libxcursor1, libx11-xcb1, libxkbcommon0, libfontconfig1 -- all
+    standard GUI stack packages pulled in on any UOS / Debian desktop.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sat, 08 Aug 2026 13:10:00 +0000
+
 ruyiseek (0.1.0-2) unstable; urgency=medium
 
   * Switch release binaries from x86_64-unknown-linux-gnu to

@@ -1,5 +1,5 @@
 Package: ruyiseek
-Version: 0.1.0-2
+Version: 0.1.0-3
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -7,7 +7,7 @@ Maintainer: RuyiSeek contributors <ruyiseek@users.noreply.github.com>
 Homepage: https://github.com/EthanBird/RuyiSeek
 Vcs-Browser: https://github.com/EthanBird/RuyiSeek
 Vcs-Git: https://github.com/EthanBird/RuyiSeek.git
-Depends: libx11-6
+Depends: libc6, libgcc1, libx11-6, libxcb1, libxi6, libxcursor1, libx11-xcb1, libxkbcommon0, libfontconfig1
 Recommends: systemd
 Suggests: xdg-utils, libdbus-1-3
 Description: 如意寻 — UOS/DDE 全局文件与应用启动器
@@ -23,7 +23,12 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  .
  索引范围、收藏、拼音匹配、原生索引快照等能力将在后续版本中提供。
  .
- 本版本完全静态链接（musl libc），不再依赖系统 libc6 / libgcc-s1，
- 可在 glibc ≥ 2.28 的 Debian/UOS 系统上直接 dpkg 安装，无 apt-get -f
- 需要。
-Installed-Size: 13300
+ 本包采用混合构建：
+  * `ruyi`、`ruyiseekd` 完全静态链接（musl libc），零系统 C 库依赖；
+  * `ruyiseek-ui` 动态链接到系统 glibc（Slint/winit 通过 dlopen 加载
+    libX11.so.6 等 X11 客户端库，而 musl-static 的 dlopen 是桩函数）。
+ .
+ 因此 `ruyiseek-ui` 需要运行时存在 libc6 / libgcc1 与若干 X11 库；
+ `ruyi` 与 `ruyiseekd` 不依赖这些。安装路径只需 `dpkg -i ./xxx.deb`
+ 或 `apt install ./xxx.deb`，无需 `apt-get -f`。
+Installed-Size: 13116
