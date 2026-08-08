@@ -1,3 +1,18 @@
+ruyiseek (0.1.0-5) unstable; urgency=medium
+
+  * Update the post-install banner so it reflects the new auto-start
+    behavior. The previous message told users to run
+    `systemctl --user enable --now ruyiseekd.service` (or log out and
+    back in) before the launcher would work; that is no longer required
+    because ruyiseek-ui now spawns the daemon itself. The new message
+    describes the install-and-click flow, lists the common subcommands
+    (--settings, --background, --quit), and demotes the systemd user
+    units to an optional "log in and the tray starts automatically"
+    follow-up rather than a prerequisite.
+  * No binary changes; this is a documentation-only release.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sat, 08 Aug 2026 16:09:00 +0000
+
 ruyiseek (0.1.0-4) unstable; urgency=medium
 
   * Make the UI binary auto-start the ruyiseekd daemon if it is not
