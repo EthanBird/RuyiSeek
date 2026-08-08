@@ -1,3 +1,24 @@
+ruyiseek (0.1.0-4) unstable; urgency=medium
+
+  * Make the UI binary auto-start the ruyiseekd daemon if it is not
+    already running. Previously a fresh install (or a daemon that was
+    killed) would surface "无法连接后台服务：..." in the status bar
+    because the launcher's Exec= /usr/bin/ruyiseek-ui only started the
+    UI, never the daemon. Now ruyiseek-ui probes the socket on startup
+    and, if it is unreachable, spawns the sibling ruyiseekd binary,
+    waits up to 5 s for it to bind, then proceeds. The daemon is
+    forked as a detached child (its std::process::Child handle is
+    dropped so the OS reparents it to PID 1 when the UI exits), so
+    closing the UI no longer takes the indexer down with it.
+  * Install flow: install .deb → click launcher → daemon and UI both
+    come up with no extra steps. Users who already manage ruyiseekd
+    via systemd --user see no change (the probe returns early).
+  * Best-effort: any failure to start the daemon is logged to stderr
+    but does not abort the UI; the existing "无法连接后台服务" status
+    bar message is still shown in that case.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sat, 08 Aug 2026 15:35:00 +0000
+
 ruyiseek (0.1.0-3) unstable; urgency=medium
 
   * Revert the fully-static musl build for ruyiseek-ui. Musl's libc.a

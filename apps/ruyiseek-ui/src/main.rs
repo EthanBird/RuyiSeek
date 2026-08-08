@@ -6,8 +6,10 @@ use ruyiseek_platform::x11_hotkey::DoubleCtrlControl;
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use std::cell::{Cell, RefCell};
 use std::error::Error;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::os::unix::process::CommandExt;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -84,6 +86,8 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
         loaded_config.suppress_in_fullscreen,
     );
     let app_config = Rc::new(RefCell::new(loaded_config));
+
+    ensure_daemon_running();
 
     let launcher = LauncherWindow::new()?;
     let visible = Rc::new(Cell::new(false));
@@ -558,6 +562,117 @@ fn install_hotkey(
             None
         }
     }
+}
+
+/// Ensure the `ruyiseekd` search daemon is running before the UI starts
+/// talking to it. The user's expected workflow is: install the .deb, click
+/// the launcher — daemon and UI should both come up. If the daemon is not
+/// yet running (no socket at the default path, or stale socket from a
+/// crashed previous instance), spawn it as a detached child and wait for
+/// it to bind.
+///
+/// This is best-effort: any failure is logged to stderr but does not abort
+/// the UI. The search worker will surface the connection error to the user
+/// in the same way it does today, so the message users see is unchanged if
+/// the daemon really cannot be started.
+fn ensure_daemon_running() {
+    const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+    const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
+    const POLL_INTERVAL: Duration = Duration::from_millis(150);
+
+    let socket = default_socket_path();
+    if probe_daemon(&socket, PROBE_TIMEOUT) {
+        return;
+    }
+
+    let Some(daemon_path) = locate_daemon_binary() else {
+        eprintln!(
+            "ruyiseek-ui: 找不到 ruyiseekd 可执行文件；请手动启动 ruyiseekd 或重新安装如意寻"
+        );
+        return;
+    };
+
+    eprintln!("ruyiseek-ui: 启动后台服务 ruyiseekd ({daemon_path:?})");
+    // SAFETY: pre_exec runs in the freshly-forked child between fork and
+    // exec. The closure is async-signal-safe and only calls libc::setsid,
+    // which is always safe to call in that window.
+    let spawn_result = unsafe {
+        Command::new(&daemon_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            // Detach the daemon into its own session so it is not killed when
+            // the UI exits: the kernel sends SIGHUP to every process in the
+            // UI's session when the session leader terminates, and the daemon
+            // does not install a SIGHUP handler. setsid() makes the daemon a
+            // new session leader with no controlling terminal, so it survives
+            // the UI's exit and is reparented to PID 1.
+            .pre_exec(|| {
+                // SAFETY: setsid is async-signal-safe and only fails if the
+                // calling process is already a process-group leader. The
+                // freshly-forked child is not a leader, so this is fine.
+                if unsafe { libc::setsid() } == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            })
+            .spawn()
+    };
+    match spawn_result {
+        Ok(_child) => { /* intentionally drop the Child handle so the daemon outlives the UI; the OS reparents it to PID 1 when this UI exits. */ }
+        Err(error) => {
+            eprintln!("ruyiseek-ui: 无法启动 ruyiseekd：{error}");
+            return;
+        }
+    }
+
+    let deadline = std::time::Instant::now() + SOCKET_TIMEOUT;
+    while std::time::Instant::now() < deadline {
+        if probe_daemon(&socket, PROBE_TIMEOUT) {
+            return;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    eprintln!(
+        "ruyiseek-ui: ruyiseekd 启动等待超时（{} 秒）；状态栏将显示连接失败",
+        SOCKET_TIMEOUT.as_secs()
+    );
+}
+
+fn probe_daemon(socket: &Path, timeout: Duration) -> bool {
+    request_daemon(socket, &Request::Ping, timeout).is_ok()
+}
+
+fn locate_daemon_binary() -> Option<PathBuf> {
+    // Prefer a sibling of the running UI binary so a moved /usr/bin install
+    // still finds its daemon. Fall back to a manual PATH walk that ignores
+    // `is_file()` (which only checks the cwd) and covers /usr/bin,
+    // /usr/local/bin, /bin, /sbin, /usr/sbin, and $PATH.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let sibling = parent.join("ruyiseekd");
+            if sibling.is_file() {
+                return Some(sibling);
+            }
+        }
+    }
+    let mut search_paths: Vec<PathBuf> = vec![
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/bin"),
+        PathBuf::from("/sbin"),
+        PathBuf::from("/usr/sbin"),
+    ];
+    if let Ok(path_var) = std::env::var("PATH") {
+        search_paths.extend(path_var.split(':').map(PathBuf::from));
+    }
+    for dir in search_paths {
+        let candidate = dir.join("ruyiseekd");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn stop_daemon() -> Result<(), String> {
