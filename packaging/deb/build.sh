@@ -56,6 +56,16 @@ done
 mkdir -p "$DIST"
 
 if [ "$SKIP_BUILD" = 0 ]; then
+    echo "==> compiling shim.o for musl link-time stubs"
+    # .cargo/config.toml hard-links packaging/deb/shim.o into every musl
+    # build. packaging/deb/build.sh is responsible for producing it from
+    # packaging/shim.c (kept one level out of $STAGING so the source
+    # never ends up inside the .deb). Compiling it here means a clean
+    # checkout works without manual cc invocations, and the file is
+    # always fresh (build.sh's tree-refresh find below then removes the
+    # stale .o so we never link a dirty object).
+    cc -c "$ROOT_DIR/packaging/shim.c" -o "$STAGING/shim.o"
+
     echo "==> cargo build --release --target $TARGET_STATIC -p ruyi-cli -p ruyiseekd"
     # x11-dl's build.rs runs `pkg-config --variable=libdir x11` to bake the
     # runtime dlopen path into its generated config.rs. On a build host

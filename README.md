@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-仓库目前完成了阶段 A1 的第四个纵向切片：
+仓库目前完成了阶段 A1 的第六个纵向切片：
 
 - Rust workspace 及 `ruyiseekd`、`ruyiseek-ui`、`ruyi` 三个进程入口；
 - 可独立测试的双击 Ctrl 状态机，覆盖长按、组合键、自动重复和锁屏/全屏抑制；
@@ -22,9 +22,12 @@
 - 登录后自动启动、双击 Ctrl、全屏抑制三个可配置选项，热键设置保存后立即生效；
 - 明确区分退出 UI 与完全退出，完全退出通过本地 IPC 正常停止 daemon；
 - daemon、CLI 与 GUI 之间可运行的端到端查询链路；
-- `--background` 常驻模式，以及 systemd 用户服务、D-Bus 激活和 Deepin XDG Autostart 配置。
+- `--background` 常驻模式，以及 systemd 用户服务、D-Bus 激活和 Deepin XDG Autostart 配置；
+- 单文件 `.deb` 安装包（`dist/ruyiseek_<版本>_amd64.deb`），混合 musl/gnu 构建，`apt install ./xxx.deb` 即可；
+- UI 自动 fork daemon：未检测到运行中的 `ruyiseekd` 时自行拉起，关 UI 不带走 daemon；
+- 方向键导航（v0.1.0-6）：在 XInput2 raw stream 上拦截 ↑↓←→ 并回灌 `selected-index`，解决 Slint 1.6 把方向键交给 LineEdit 内部 TextInput、导致父级 key-pressed 看不到的问题。
 
-持久化增量索引和安装打包仍在后续迭代中。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口、搜索、单实例与托盘可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
+持久化增量索引仍在后续迭代中。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口、搜索、单实例与托盘可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
 
 ## 构建
 
@@ -34,6 +37,24 @@
 cargo build --workspace
 cargo test --workspace
 ```
+
+## 安装包（DEB）
+
+单文件 `.deb` 已自带所有运行时库依赖（`libc6`、`libgcc1`、`libx11-6` 等标准 GUI 栈），在统信 UOS 20 / Deepin / Debian 10+ 主机上直接装：
+
+```bash
+sudo apt install ./dist/ruyiseek_0.1.0-6_amd64.deb
+# 或
+sudo dpkg -i dist/ruyiseek_0.1.0-6_amd64.deb
+```
+
+无需 `apt-get -f install`，也无需先编译。装完后登录桌面，托盘自动出现；双击 Ctrl 唤起启动器，回车打开搜索项。如需重新构建产物：
+
+```bash
+bash packaging/deb/build.sh
+```
+
+构建脚本对 `ruyiseekd` 与 `ruyi` 走 `x86_64-unknown-linux-musl`（纯静态），`ruyiseek-ui` 走 `x86_64-unknown-linux-gnu`（动态链接，因为 winit/x11-dl 在运行时 `dlopen` `libX11.so.6`，musl-static 的 `dlopen` 是桩函数）。
 
 ## 本地演示
 
@@ -88,6 +109,6 @@ cargo run -p ruyiseek-ui -- --demo-double-ctrl
 ## 兼容目标
 
 - 统信 UOS / Deepin，x86_64 与 aarch64；
-- X11 上完整支持双击 Ctrl，Wayland 遵循 Portal / DDE 能力边界；
+- X11 上完整支持双击 Ctrl（含方向键选择），Wayland 遵循 Portal / DDE 能力边界；
 - 不以 root 运行，不读取 `/dev/input`，不监听 TCP；
-- Debian 10 / UOS 兼容构建将在专用容器中执行，避免新 glibc 污染发布物。
+- 发布物在 Debian 10 / UOS 兼容 glibc 上验证，避免新 glibc 污染。

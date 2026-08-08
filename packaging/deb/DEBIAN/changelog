@@ -1,3 +1,40 @@
+ruyiseek (0.1.0-7) unstable; urgency=medium
+
+  * UI: closing the settings window now returns to the launcher instead of
+    hiding the entire window. Previously the close button called
+    launcher.hide() and dropped the visible flag, which forced the user
+    to either re-press Ctrl twice or click the tray to bring the
+    launcher back; now the handler exits settings mode, focuses the
+    search input, and re-marks the window visible so the user can keep
+    typing immediately. Escape / tray Hide / double-Ctrl still act as
+    full-hide shortcuts.
+  * ruyiseekd: when started with no --root (the path taken by
+    ruyiseek-ui's detached fork in ensure_daemon_running), fall back to
+    $HOME first instead of current_dir. Without this, a daemon forked
+    from a process with cwd=/ would fill the snapshot with kernel
+    modules and glibc paths and starve the user's real files out of
+    the Top-K. $HOME fallback is verified by a new unit test
+    no_root_arg_falls_back_to_home_when_available.
+  * Build: move packaging/deb/shim.c to packaging/shim.c so the source
+    stays out of the .deb, and have packaging/deb/build.sh compile it
+    into packaging/deb/shim.o before every musl cargo invocation.
+    Previously shim.c lived at the top of the .deb staging tree and
+    was deleted by build.sh's cleanup find, breaking the next clean
+    build with "cannot open shim.o".
+  * Documentation: align implementation-status.md, README.md, and the
+    long-form design doc with the actual 0.1.0-6/7 source layout.
+    implementation-status moves A1.5 to "已完成" and adds an A1.6
+    follow-up section. README adds an "安装包（DEB）" section and the
+    .deb / auto-fork / arrow-nav bullet points. The design doc drops
+    the never-implemented integration-host prose (sections 6.1, 6.2),
+    lists only the 5 crates + 3 apps that actually exist, fixes the
+    systemd units in 18.4 to Type=simple with Requires=ruyiseekd,
+    prunes CLI subcommands in 20.3 to the four that are implemented,
+    and updates the install path table in 25.2 to the files produced
+    by packaging/deb/build.sh.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sat, 08 Aug 2026 17:10:00 +0000
+
 ruyiseek (0.1.0-6) unstable; urgency=medium
 
   * Fix the arrow-key navigation bug reported as "无法用方向键选择文件".

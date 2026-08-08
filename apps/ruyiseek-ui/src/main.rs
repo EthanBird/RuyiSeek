@@ -217,16 +217,16 @@ fn install_settings_callbacks(
     visible: Rc<Cell<bool>>,
 ) {
     let weak_launcher = launcher.as_weak();
+    let visible_for_close = Rc::clone(&visible);
     launcher.on_close_settings(move || {
         let Some(launcher) = weak_launcher.upgrade() else {
             return;
         };
+        // 退出设置模式并回到启动器：保留窗口可见、聚焦搜索框，让用户立刻
+        // 可以继续打字搜索。Esc / 托盘菜单 / 双击 Ctrl 仍负责完全隐藏。
         launcher.set_settings_mode(false);
-        if let Err(error) = launcher.hide() {
-            eprintln!("ruyiseek-ui: 隐藏设置窗口失败：{error}");
-        } else {
-            visible.set(false);
-        }
+        launcher.invoke_focus_query();
+        visible_for_close.set(true);
     });
 
     let weak_launcher = launcher.as_weak();

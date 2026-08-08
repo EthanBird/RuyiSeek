@@ -169,7 +169,18 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<Config>, Box<
     }
 
     if roots.is_empty() {
-        roots.push(std::env::current_dir()?);
+        // 当 UI fork 出 daemon 时不会传任何参数，回落到 $HOME，避免无意义地
+        // 索引 / 根目录（c++ runtime + 内核模块会让 Top-K 全部跑飞）。如果
+        // $HOME 不存在（极端容器/POSIX-only 环境），最后再退回 current_dir。
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            if home.is_dir() {
+                roots.push(home);
+            } else {
+                roots.push(std::env::current_dir()?);
+            }
+        } else {
+            roots.push(std::env::current_dir()?);
+        }
     }
     if max_entries == 0 {
         return Err("--max-entries must be greater than zero".into());
@@ -332,5 +343,30 @@ mod tests {
         )
         .expect("decode response");
         assert_eq!(response, Response::Acknowledged);
+    }
+
+    #[test]
+    fn no_root_arg_falls_back_to_home_when_available() {
+        // 当 UI fork 出 daemon 时不带任何参数，应当落到 $HOME 而非 current_dir，
+        // 这样无论 UI 是从 autostart、托盘还是 shell 拉起，daemon 索引的都是
+        // 用户的真实文件树，而不是 / 或者容器 cwd。
+        let config = parse_args(std::iter::empty())
+            .expect("parse_args")
+            .expect("non-help result");
+        assert_eq!(config.roots.len(), 1, "应至少注入一个 root");
+        let expected = std::env::var_os("HOME").map(PathBuf::from);
+        match expected {
+            Some(home) if home.is_dir() => {
+                assert_eq!(config.roots[0], home, "应该直接使用 $HOME");
+            }
+            _ => {
+                // 容器或 CI 中 $HOME 可能未设置 / 不是目录，回落 current_dir 也合法。
+                assert_eq!(
+                    config.roots[0],
+                    std::env::current_dir().expect("current_dir"),
+                    "无 $HOME 时退回 current_dir"
+                );
+            }
+        }
     }
 }

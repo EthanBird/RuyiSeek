@@ -261,54 +261,36 @@ flowchart TD
 - 提前创建启动器窗口并隐藏，避免每次呼出重新加载。
 - 断开守护进程时仍可显示错误状态、设置页和修复入口。
 
-#### ruyiseek-integration-host
-
-- 仅在需要文件管理器或文件对话框插件时加载。
-- 隔离不同工具包适配器崩溃。
-- 通过能力声明报告当前环境支持的功能。
-- 可以按 DDE、GTK、Qt、Portal 分成独立动态组件。
-
 ### 6.2 Rust 工作区
 
-建议仓库结构：
+当前仓库实际结构（`Cargo.toml` 的 `members` 列表）：
 
     ruyiseek/
-    ├── Cargo.toml
+    ├── Cargo.toml                 # workspace 根，version 0.1.0、resolver=2
+    ├── Cargo.lock                 # 所有依赖锁定（slint 1.6.0、dbus 0.9.7、x11rb 等）
+    ├── README.md
     ├── crates/
-    │   ├── ruyiseek-core/
-    │   ├── ruyiseek-index/
-    │   ├── ruyiseek-query/
-    │   ├── ruyiseek-rank/
-    │   ├── ruyiseek-storage/
-    │   ├── ruyiseek-ipc/
-    │   ├── ruyiseek-platform/
-    │   ├── ruyiseek-integrations/
-    │   ├── ruyiseek-actions/
-    │   ├── ruyiseek-preview/
-    │   └── ruyiseek-plugin-sdk/
+    │   ├── ruyiseek-core/         # 跨进程共享的结果类型（SearchResult、SearchKind 等）
+    │   ├── ruyiseek-index/        # 有边界、不跟随符号链接的目录快照
+    │   ├── ruyiseek-ipc/          # 1 MiB 上限的长度前缀帧 + 协议版本
+    │   ├── ruyiseek-platform/     # X11/XInput2 热键 + 系统调用适配
+    │   └── ruyiseek-query/        # 名称/路径召回 + 连续子序列匹配 + Top-K
     ├── apps/
-    │   ├── ruyiseekd/
-    │   ├── ruyiseek-ui/
-    │   ├── ruyi-cli/
-    │   └── integration-host/
+    │   ├── ruyi-cli/              # 命令行（ping / status / search / stop）
+    │   ├── ruyiseekd/             # 单实例 Unix Socket 守护进程
+    │   └── ruyiseek-ui/           # Slint 启动器 + 托盘 + 会话 D-Bus + 自动启动
     ├── ui/
-    │   ├── launcher.slint
-    │   ├── deep-search.slint
-    │   ├── quick-switch.slint
-    │   ├── settings.slint
-    │   └── components/
+    │   └── launcher.slint         # 唯一 .slint 源文件，build.rs 把它嵌入二进制
     ├── packaging/
-    │   ├── debian/
-    │   ├── systemd-user/
-    │   ├── dbus/
-    │   ├── desktop/
+    │   ├── deb/                   # 单文件 .deb（DEBIAN/ + usr/ + etc/xdg/autostart/）
+    │   ├── systemd-user/          # 可选 ruyiseek-ui.service / ruyiseekd.service
+    │   ├── dbus-1/services/       # session bus activation service
+    │   ├── desktop/               # X-RuyiSeek-Managed 标记的 Desktop Entry 模板
+    │   ├── autostart/             # Deepin XDG Autostart 入口
     │   └── icons/
-    ├── tests/
-    │   ├── corpus/
-    │   ├── integration/
-    │   ├── performance/
-    │   └── visual/
     └── docs/
+        ├── implementation-status.md
+        └── 如意寻_RuyiSeek_完整开发设计文档.md
 
 ### 6.3 UI 技术选型
 
@@ -1247,23 +1229,43 @@ Ignored 只影响如意寻结果，不修改文件权限。
 
 ### 18.4 systemd 用户服务
 
-ruyiseekd.service：
+`packaging/systemd-user/ruyiseekd.service`：
 
     [Unit]
-    Description=RuyiSeek Index and Search Service
+    Description=RuyiSeek search daemon
     After=graphical-session.target
 
     [Service]
-    Type=dbus
-    BusName=io.github.ethanbird.RuyiSeek.Daemon
-    ExecStart=/usr/libexec/ruyiseek/ruyiseekd
+    Type=simple
+    ExecStart=/usr/bin/ruyiseekd
     Restart=on-failure
     RestartSec=2
 
     [Install]
     WantedBy=default.target
 
-UI 使用独立服务或 DDE XDG Autostart。安装程序应检测当前 UOS 的用户级 systemd 支持情况，并选择单一启动方式，避免启动两份。
+`packaging/systemd-user/ruyiseek-ui.service`：
+
+    [Unit]
+    Description=RuyiSeek desktop integration
+    After=graphical-session.target ruyiseekd.service
+    Requires=ruyiseekd.service
+
+    [Service]
+    Type=simple
+    ExecStart=/usr/bin/ruyiseek-ui --background
+    Restart=on-failure
+    RestartSec=2
+
+    [Install]
+    WantedBy=default.target
+
+实际行为：
+- `Type=simple`（不是 `dbus`）：daemon 启动后即视为就绪，因为它没有声明 D-Bus `BusName=`；socket 探测是 UI 进程在 `connect_timeout` 内的客户端责任，超时则自动 fork 一个新的 daemon。
+- `Requires=ruyiseekd.service`：启用 UI 服务时强制拉起 daemon 服务，避免只装一份 systemd 单元但 UI 永远连不上 daemon。
+- `ruyiseek-ui --background`：UI 以隐藏常驻模式启动，托盘不依赖于 launcher 窗口；用户手动关闭 launcher 窗口后 systemd 不会重启。
+- 安装程序应检测当前 UOS 的用户级 systemd 支持情况，并选择单一启动方式（systemd 用户服务 vs Deepin XDG Autostart），避免启动两份；D-Bus 单实例会让后启动进程安全退出。
+- 这两个单元是可选的，0.1.0-6 起 UI 在未检测到 daemon 时会自行 fork，因此纯 `apt install ./xxx.deb` 不需要任何后续 `systemctl --user` 操作。
 
 ### 18.5 单实例
 
@@ -1428,19 +1430,24 @@ UI 对每次输入递增 client_generation，丢弃过期响应。
 
 ### 20.3 CLI
 
-示例：
+当前 0.1.0-6 实现的子命令（见 `apps/ruyi-cli/src/main.rs`）：
 
     ruyi
-    ruyi search "年度报告"
-    ruyi search "doc: 报告 in:~/工作"
-    ruyi open ITEM_ID
-    ruyi reveal ITEM_ID
-    ruyi launcher
-    ruyi deep-search
-    ruyi index status
-    ruyi index rebuild HOME
-    ruyi index pause 1h
-    ruyi config export backup.json
+    ruyi ping                                  # 探测 daemon socket 是否可达
+    ruyi status                                # 查询 daemon 状态（启动时间、索引根、版本）
+    ruyi search <关键词...>                    # 复用 UI 的 IPC 协议，返回 Top-K
+    ruyi stop                                  # 走 IPC SHUTDOWN，daemon 应答后退出
+
+未实现的子命令（占位，等对应功能落地）：
+
+    ruyi open ITEM_ID                          # 由 daemon 端解析 ITEM_ID 并打开
+    ruyi reveal ITEM_ID                        # 在文件管理器中定位 ITEM_ID
+    ruyi launcher                              # 同 ruyi 单独运行，只检查 daemon 后退出
+    ruyi deep-search                           # 深度扫描模式开关（与 quick 不同）
+    ruyi index status                          # 索引快照元信息
+    ruyi index rebuild HOME                    # 强制重建 HOME 索引
+    ruyi index pause 1h                        # 暂停后台索引 1 小时
+    ruyi config export backup.json             # 导出当前配置快照
 
 ### 20.4 URI
 
@@ -1744,15 +1751,23 @@ UI 对每次输入递增 client_generation，丢弃过期响应。
 
 ### 25.2 安装路径
 
-    /usr/bin/ruyi
-    /usr/bin/ruyiseek
-    /usr/libexec/ruyiseek/ruyiseekd
-    /usr/libexec/ruyiseek/integration-host
+实际由 `packaging/deb/build.sh` 在 0.1.0-6 中产出的文件树：
+
+    /usr/bin/ruyi                            # CLI（musl 静态二进制）
+    /usr/bin/ruyiseekd                       # 守护进程（musl 静态二进制）
+    /usr/bin/ruyiseek-ui                     # 启动器 GUI（gnu 动态二进制）
     /usr/share/applications/io.github.ethanbird.RuyiSeek.desktop
-    /usr/share/icons/hicolor/
-    /usr/share/dbus-1/services/
-    /usr/lib/systemd/user/ruyiseekd.service
-    /usr/share/ruyiseek/
+    /usr/share/dbus-1/services/io.github.ethanbird.RuyiSeek.service
+    /usr/share/doc/ruyiseek/{README,README.Debian,copyright,changelog.gz}
+    /usr/share/man/man1/ruyiseek.1.gz
+    /etc/xdg/autostart/io.github.ethanbird.RuyiSeek.desktop   # 可选：Deepin 自动启动入口
+    /usr/lib/systemd/user/ruyiseekd.service  # 可选：systemd 用户单元
+    /usr/lib/systemd/user/ruyiseek-ui.service # 可选：systemd 用户单元
+
+说明：
+- 二进制名是 `ruyiseek-ui`、`ruyiseekd`、`ruyi`，没有 `ruyiseek` 或 `integration-host`。托盘 / D-Bus 激活 / Desktop Entry 启动 `ruyiseek-ui`，进程内再决定是否 fork `ruyiseekd`。
+- systemd 用户单元是可选的；`apt install ./xxx.deb` 不会自动 `systemctl --user enable`，UI 会自己 fork daemon。如果用户主动启用 `ruyiseek-ui.service`，它通过 `Requires=ruyiseekd.service` 拉起 daemon。
+- `/etc/xdg/autostart/` 入口是 DDE 环境下与 systemd --user 二选一的另一条路径，由 `packaging/deb/etc/xdg/autostart/io.github.ethanbird.RuyiSeek.desktop` 提供。
 
 ### 25.3 升级
 

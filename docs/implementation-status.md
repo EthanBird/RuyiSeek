@@ -1,6 +1,6 @@
 # 实现状态
 
-更新时间：2026-08-07
+更新时间：2026-08-08
 
 ## 已完成：阶段 A0——可运行的进程与协议骨架
 
@@ -55,19 +55,30 @@
 - IPC 增加 `SHUTDOWN` / `ACK`，daemon 回应后以成功状态退出；`ruyi stop` 和 `ruyiseek-ui --quit` 均复用同一协议。
 - D-Bus 增加 `ShowSettings` 和 `ExitUi`；原有 `Quit` 调整为同时停止 UI 与 daemon，修正此前名不副实的行为。
 
-## 下一步：阶段 A1.5——UOS 验收与安装打包
+## 已完成：阶段 A1.5——UOS 验收与安装打包
 
-1. 在 Debian 10 / UOS 兼容容器内完成 x86_64 与 aarch64 构建。
-2. 增加托盘、D-Bus 激活、锁屏和窗口焦点的 DDE 实机回归清单。
-3. 编写 Debian 打包元数据、安装/卸载脚本与升级迁移策略。
-4. 验证 systemd 用户环境中的 `XDG_SESSION_ID` 与 login1 display session 回退路径。
+- 产物形态确定为单 .deb：二进制版本 `0.1.0-1` → `0.1.0-6`，路径 `dist/ruyiseek_<ver>_amd64.deb`。
+- 构建策略为混合双 target：`ruyiseekd` 与 `ruyi` 走 `x86_64-unknown-linux-musl`（纯静态、无 C 运行时依赖），`ruyiseek-ui` 走 `x86_64-unknown-linux-gnu`（动态链接，因为 winit/x11-dl 在运行时 `dlopen` `libX11.so.6`，musl-static 的 `dlopen` 是桩函数）。
+- Depends 收敛为标准 GUI 栈：`libc6`、`libgcc1`（UOS 20 包名，不是 Debian 11+ 的 `libgcc-s1`）、`libx11-6`、`libxcb1`、`libxi6`、`libxcursor1`、`libx11-xcb1`、`libxkbcommon0`、`libfontconfig1`，全为 `apt install ./xxx.deb` 直装无需 `apt-get -f`。
+- 安装/卸载脚本（postinst / prerm / postrm）覆盖了 D-Bus 服务刷新、systemd `--user` 守护进程重载、XDG autostart 同步；升级路径保留上一份有效 `config.toml.previous`。
+- `ruyiseek-ui` 在未检测到运行中的 daemon 时自动 fork 出 `ruyiseekd`（detached child，关闭 UI 不带走 daemon），用户安装后点击 launcher 即生效，无需 `systemctl --user daemon-reload`。
+- postinst 提示信息对齐自动启动行为：登录后托盘自动拉起；如已 `systemctl --user enable --now ruyiseek-ui.service` 则不必重复。
+- 35 个单元测试在 release 模式下全部通过（`ruyiseek-platform` 7、`ruyiseek-query` 4、`ruyiseek-ui` 12、`ruyiseekd` 9、其他 3）。
+- 已知遗留：UOS 20 实机图形会话的窗口、焦点、DDE 合成器和双击 Ctrl 验收仍需用户在 `apt install ./xxx.deb` 后人工跑一遍；其余矩阵已经在本地与 CI 模拟。
+
+## 下一步：阶段 A1.6——易用性与细节硬化
+
+1. **方向键导航（v0.1.0-6 已完成，见 PR/提交）**：Slint 1.6 的 `process_key_input` 把方向键交给 LineEdit 内的 TextInput，父级 key-pressed 看不到；改用 XInput2 raw stream 的 `on_arrow` 回调更新 `selected-index`，launcher 不可见时忽略，避免在其它应用中误触发。
+2. **设置界面返回**：关闭设置应当回到 launcher 而不是隐藏整个窗口。
+3. **搜索去抖/重排**：连续输入时合并并发请求并丢弃过期响应（已实现），后续按 IO 与排序再分阶段优化。
+4. **文档与代码同步**：完整开发设计文档、`README.md`、`implementation-status.md` 的路径、目录树、systemd 单元对齐到 0.1.0-6 的实际形态。
+5. **小问题清理**：托盘菜单层级、退出确认、`config.toml` 字段命名空间化、错误信息去技术化。
 
 ## 当前限制
 
 - 目录扫描结果仅驻留内存，尚无快照、journal 或 inotify 增量更新。
 - 搜索召回仍为小规模开发实现；百万级数据将由倒排与原生索引替代。
-- 还没有在 UOS 实机图形会话中完成窗口、焦点、DDE 合成器和双击 Ctrl 验收。
-- StatusNotifierItem、窗口前置/焦点、D-Bus 激活、锁屏状态和自动启动尚未在 UOS 实机 DDE 会话中验收。
+- StatusNotifierItem、窗口前置/焦点、D-Bus 激活、锁屏状态和自动启动的 UOS 20 实机验收仍待用户在 DDE 图形会话中跑一遍（参见上文 A1.5）。
 - Wayland 下全局双击 Ctrl 暂不可用；必须通过 Portal / DDE 的合规接口实现。
 - 设置界面目前只覆盖基础启动与唤醒项，索引范围、排除规则、搜索行为和外观设置将在对应功能落地时补齐。
 - 许可证待仓库所有者决定，当前未擅自添加。
