@@ -250,14 +250,39 @@ export component LauncherWindow inherits Window {
     background: transparent;
 
     focus-scope := FocusScope {
+        // Slint 1.6 的 key 事件链 child-first：LineEdit 内部的 TextInput 占据
+        // focus_item，并把方向键 / Home / End / Backspace / Delete / Ctrl+A/C/V/X
+        // / Ctrl+Left/Right 等都吃掉用于光标或选区。父级 key-pressed 看不到这些键。
+        // 这里只处理 TextInput 不吃的键：PageUp/Down、Escape、Ctrl+P/N/L。
+        // 方向键（↑↓←→）单独在 Rust 端拦截后回灌到 selected-index，逻辑在
+        // apps/ruyiseek-ui/src/main.rs::apply_arrow_to_selection，事件源是
+        // crates/ruyiseek-platform/src/x11_hotkey.rs 的 on_arrow 回调（XInput2 raw stream）。
         visible: !root.settings-mode;
         key-pressed(event) => {
-            if (event.text == Key.DownArrow && root.results.length > 0) {
-                root.selected-index = Math.min(root.selected-index + 1, root.results.length - 1);
+            // Slint 1.6 的 .slint 端只暴露 event.text（string）和 event.modifiers，
+            // 不能访问 event.key。Key.X 常量会隐式转成对应的 Unicode 字符（PUA）
+            // 再和 event.text 比较，所以这里全部走 event.text == Key.X 的写法。
+            if (event.text == Key.PageDown && root.results.length > 0) {
+                root.selected-index = Math.min(root.selected-index + 5, root.results.length - 1);
                 return accept;
             }
-            if (event.text == Key.UpArrow && root.results.length > 0) {
-                root.selected-index = Math.max(root.selected-index - 1, 0);
+            if (event.text == Key.PageUp && root.results.length > 0) {
+                root.selected-index = Math.max(root.selected-index - 5, 0);
+                return accept;
+            }
+            // Key enum 里没有字母键，Ctrl+P/N/L 只能通过 event.text 比对。
+            if (event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt
+                    && (event.text == "p" || event.text == "n") && root.results.length > 0) {
+                root.selected-index = event.text == "p"
+                    ? Math.max(root.selected-index - 1, 0)
+                    : Math.min(root.selected-index + 1, root.results.length - 1);
+                return accept;
+            }
+            if (event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt
+                    && event.text == "l" && root.query != "") {
+                root.query = "";
+                root.selected-index = 0;
+                root.query-edited("");
                 return accept;
             }
             if (event.text == Key.Escape) {
@@ -311,6 +336,7 @@ export component LauncherWindow inherits Window {
                         text <=> root.query;
                         placeholder-text: "搜索文件、文件夹、应用或命令";
                         font-size: 19px;
+
                         edited(text) => {
                             root.selected-index = 0;
                             root.query-edited(text);

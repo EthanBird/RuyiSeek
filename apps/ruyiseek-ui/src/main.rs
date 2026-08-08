@@ -1,6 +1,7 @@
 use ruyiseek_ipc::{default_socket_path, request_daemon, DaemonStatus, Request, Response};
 use ruyiseek_platform::hotkey::{
-    ControlKey, DoubleCtrlRecognizer, GestureContext, GestureDecision, Key, KeyEvent, KeyState,
+    ArrowKey, ControlKey, DoubleCtrlRecognizer, GestureContext, GestureDecision, Key, KeyEvent,
+    KeyState,
 };
 use ruyiseek_platform::x11_hotkey::DoubleCtrlControl;
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
@@ -327,6 +328,9 @@ fn install_ui_event_pump(
                 UiEvent::Desktop(action) => {
                     apply_desktop_action(&launcher, &visible, &app_config, &worker_sender, action);
                 }
+                UiEvent::Arrow(arrow) if visible.get() => {
+                    apply_arrow_to_selection(&launcher, &result_paths, arrow);
+                }
                 UiEvent::Shutdown(Ok(())) => quit_ui(),
                 UiEvent::Shutdown(Err(error)) => {
                     eprintln!("ruyiseek-ui: 完全退出时停止后台服务失败：{error}");
@@ -336,7 +340,7 @@ fn install_ui_event_pump(
                 UiEvent::HotkeyIssue(message) if launcher.get_query().trim().is_empty() => {
                     launcher.set_status_text(message.into());
                 }
-                UiEvent::Search { .. } | UiEvent::HotkeyIssue(_) => {}
+                UiEvent::Search { .. } | UiEvent::HotkeyIssue(_) | UiEvent::Arrow(_) => {}
             }
         }
     });
@@ -366,6 +370,33 @@ fn apply_search_results(
     launcher.set_selected_index(0);
     if count == 0 {
         launcher.set_status_text("没有找到匹配项".into());
+    }
+}
+
+/// Move the highlighted result by one row in response to an arrow keypress.
+///
+/// Driven by the XInput2 raw stream because Slint 1.6's focused `LineEdit`
+/// consumes arrow events for its own cursor before any user-defined
+/// `key-pressed` callback on a parent `FocusScope` can see them. Only Up and
+/// Down are used; Left and Right are reserved for future column-style
+/// navigation.
+fn apply_arrow_to_selection(
+    launcher: &LauncherWindow,
+    result_paths: &RefCell<Vec<PathBuf>>,
+    arrow: ArrowKey,
+) {
+    let count = result_paths.borrow().len();
+    if count == 0 {
+        return;
+    }
+    let current = usize::try_from(launcher.get_selected_index()).unwrap_or(0);
+    let next = match arrow {
+        ArrowKey::Down => current.saturating_add(1).min(count - 1),
+        ArrowKey::Up => current.saturating_sub(1),
+        ArrowKey::Left | ArrowKey::Right => return,
+    };
+    if let Ok(value) = i32::try_from(next) {
+        launcher.set_selected_index(value);
     }
 }
 
@@ -545,11 +576,15 @@ fn install_hotkey(
     };
 
     let trigger_sender = ui_sender.clone();
+    let arrow_sender = ui_sender.clone();
     match ruyiseek_platform::x11_hotkey::spawn_double_ctrl_listener(
         lock_monitor.state(),
         control,
         move || {
             let _ = trigger_sender.send(UiEvent::Desktop(DesktopAction::Toggle));
+        },
+        move |arrow| {
+            let _ = arrow_sender.send(UiEvent::Arrow(arrow));
         },
     ) {
         Ok(listener) => Some(HotkeyRuntime {
@@ -730,6 +765,11 @@ enum UiEvent {
     Shutdown(Result<(), String>),
     Desktop(DesktopAction),
     HotkeyIssue(String),
+    /// Arrow key observed on the XInput2 raw stream. Delivered *unconditionally*
+    /// from the hotkey worker; the consumer must check `visible` before
+    /// updating the selection, because raw events fire for every press on the
+    /// X server regardless of which window has focus.
+    Arrow(ArrowKey),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

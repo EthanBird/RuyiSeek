@@ -1,3 +1,32 @@
+ruyiseek (0.1.0-6) unstable; urgency=medium
+
+  * Fix the arrow-key navigation bug reported as "无法用方向键选择文件".
+    Slint 1.6 routes KeyEvent through process_key_input in
+    child-before-parent order, and the focused LineEdit's internal
+    TextInput is the focus_item (declared via forward-focus); it accepts
+    Up/Down/Left/Right to move its own text cursor and returns
+    EventAccepted, which terminates the focus walk before any
+    user-defined key-pressed handler on a parent FocusScope can see
+    the event. As a result, no amount of slint-side handler placement
+    can intercept the arrow keys while the input still owns focus.
+  * Resolve by handling arrows at the XInput2 layer. The platform
+    crate's hotkey worker now classifies Up/Down/Left/Right keysyms
+    from the raw keycode->keysym map and dispatches them through a new
+    on_arrow callback. ruyiseek-ui forwards the callback through the
+    UI event channel as UiEvent::Arrow; the pump only acts on it when
+    the launcher window is visible, so arrow keys in other apps are
+    ignored.
+  * apply_arrow_to_selection adjusts the launcher's selected-index
+    by ±1 (Up decreases, Down increases), clamped to [0, len-1].
+    PageUp/PageDown (jump 5), Ctrl+P/N (prev/next), Ctrl+L (clear
+    query), and Escape (clear/dismiss) remain slint-side and continue
+    to work because the LineEdit does not consume them.
+  * No user-visible side effects when the launcher is hidden: the
+    callback fires but apply_arrow_to_selection early-returns because
+    the visibility guard fails.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sat, 08 Aug 2026 17:00:00 +0000
+
 ruyiseek (0.1.0-5) unstable; urgency=medium
 
   * Update the post-install banner so it reflects the new auto-start

@@ -3,7 +3,8 @@
 //! It observes raw keyboard events and never grabs or suppresses them.
 
 use crate::hotkey::{
-    ControlKey, DoubleCtrlRecognizer, GestureContext, GestureDecision, Key, KeyEvent, KeyState,
+    ArrowKey, ControlKey, DoubleCtrlRecognizer, GestureContext, GestureDecision, Key, KeyEvent,
+    KeyState,
 };
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,6 +22,10 @@ use x11rb::rust_connection::RustConnection;
 
 const CONTROL_L: u32 = 0xffe3;
 const CONTROL_R: u32 = 0xffe4;
+const UP_ARROW_KEYSYM: u32 = 0xff52;
+const DOWN_ARROW_KEYSYM: u32 = 0xff54;
+const LEFT_ARROW_KEYSYM: u32 = 0xff51;
+const RIGHT_ARROW_KEYSYM: u32 = 0xff53;
 const OTHER_MODIFIERS: &[u32] = &[
     0xffe1, 0xffe2, // Shift
     0xffe5, 0xffe6, // Caps Lock, Shift Lock
@@ -75,16 +80,25 @@ impl DoubleCtrlControl {
 
 /// Start a worker that observes `XInput2` raw keyboard events.
 ///
+/// The `on_trigger` callback fires when the double-Control gesture is
+/// recognized; `on_arrow` fires on every press of an arrow key (Up, Down,
+/// Left, Right). The arrow callback is *unconditional* — the consumer is
+/// responsible for filtering out events when the launcher is not focused,
+/// because raw events are delivered to every subscriber regardless of which
+/// X11 window currently has focus.
+///
 /// # Errors
 ///
 /// Returns [`HotkeyError`] if X11/XInput2 setup fails or the worker cannot be spawned.
-pub fn spawn_double_ctrl_listener<Callback>(
+pub fn spawn_double_ctrl_listener<TriggerCallback, ArrowCallback>(
     session_locked: Arc<AtomicBool>,
     control: DoubleCtrlControl,
-    on_trigger: Callback,
+    on_trigger: TriggerCallback,
+    on_arrow: ArrowCallback,
 ) -> Result<JoinHandle<()>, HotkeyError>
 where
-    Callback: Fn() + Send + 'static,
+    TriggerCallback: Fn() + Send + 'static,
+    ArrowCallback: Fn(ArrowKey) + Send + 'static,
 {
     let (connection, screen_number) =
         x11rb::connect(None).map_err(|error| HotkeyError(format!("连接 X11 失败：{error}")))?;
@@ -133,21 +147,24 @@ where
                 &session_locked,
                 &control,
                 &on_trigger,
+                &on_arrow,
             );
         })
         .map_err(|error| HotkeyError(format!("启动 X11 热键线程失败：{error}")))
 }
 
-fn run_event_loop<Callback>(
+fn run_event_loop<TriggerCallback, ArrowCallback>(
     connection: &RustConnection,
     root: Window,
     mut keymap: KeyMap,
     atoms: &FullscreenAtoms,
     session_locked: &AtomicBool,
     control: &DoubleCtrlControl,
-    on_trigger: &Callback,
+    on_trigger: &TriggerCallback,
+    on_arrow: &ArrowCallback,
 ) where
-    Callback: Fn(),
+    TriggerCallback: Fn(),
+    ArrowCallback: Fn(ArrowKey),
 {
     let started = Instant::now();
     let mut recognizer = DoubleCtrlRecognizer::default();
@@ -166,6 +183,9 @@ fn run_event_loop<Callback>(
             Event::XinputRawKeyPress(event) => {
                 fullscreen_blocked = control.suppress_in_fullscreen()
                     && atoms.is_fullscreen(connection, root).unwrap_or(false);
+                if let Some(arrow) = keymap.classify_arrow(event.detail) {
+                    on_arrow(arrow);
+                }
                 Some(to_key_event(&keymap, &event, KeyState::Pressed, started))
             }
             Event::XinputRawKeyRelease(event) => {
@@ -212,6 +232,11 @@ fn to_key_event(
 struct KeyMap {
     first_keycode: u8,
     entries: Vec<Key>,
+    /// Raw keysyms (Vec per keycode) for arrow detection. The X server returns
+    /// multiple keysyms per keycode because of shift levels; we keep them all
+    /// so that the arrow detector can match regardless of which group the user
+    /// is in.
+    keysyms: Vec<Vec<u32>>,
 }
 
 impl KeyMap {
@@ -232,14 +257,13 @@ impl KeyMap {
         if per_keycode == 0 {
             return Err(HotkeyError("X11 键盘映射为空".to_owned()));
         }
-        let entries = reply
-            .keysyms
-            .chunks(per_keycode)
-            .map(classify_keysyms)
-            .collect();
+        let chunks: Vec<&[u32]> = reply.keysyms.chunks(per_keycode).collect();
+        let entries = chunks.iter().map(|ks| classify_keysyms(ks)).collect();
+        let keysyms = chunks.into_iter().map(|ks| ks.to_vec()).collect();
         Ok(Self {
             first_keycode,
             entries,
+            keysyms,
         })
     }
 
@@ -254,6 +278,22 @@ impl KeyMap {
             .get(usize::from(index))
             .copied()
             .unwrap_or(Key::NonModifier)
+    }
+
+    fn classify_arrow(&self, detail: u32) -> Option<ArrowKey> {
+        let keycode = u8::try_from(detail).ok()?;
+        let index = usize::from(keycode.checked_sub(self.first_keycode)?);
+        let syms = self.keysyms.get(index)?;
+        for sym in syms {
+            match *sym {
+                UP_ARROW_KEYSYM => return Some(ArrowKey::Up),
+                DOWN_ARROW_KEYSYM => return Some(ArrowKey::Down),
+                LEFT_ARROW_KEYSYM => return Some(ArrowKey::Left),
+                RIGHT_ARROW_KEYSYM => return Some(ArrowKey::Right),
+                _ => {}
+            }
+        }
+        None
     }
 }
 

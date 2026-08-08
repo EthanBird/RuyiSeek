@@ -18,6 +18,20 @@ pub enum Key {
     NonModifier,
 }
 
+/// Directional arrow keys reported by the XInput2 listener.
+///
+/// Used by the launcher UI to advance the selected result. They are reported
+/// as a *separate* signal from [`Key`] because Slint 1.6's focused `LineEdit`
+/// swallows arrow events before any user-defined `key-pressed` callback can
+/// see them, so the UI needs the raw X11 stream to move the selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArrowKey {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeyState {
     Pressed,

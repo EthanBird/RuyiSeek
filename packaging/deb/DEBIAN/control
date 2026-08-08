@@ -1,5 +1,5 @@
 Package: ruyiseek
-Version: 0.1.0-5
+Version: 0.1.0-6
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -31,4 +31,4 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  因此 `ruyiseek-ui` 需要运行时存在 libc6 / libgcc1 与若干 X11 库；
  `ruyi` 与 `ruyiseekd` 不依赖这些。安装路径只需 `dpkg -i ./xxx.deb`
  或 `apt install ./xxx.deb`，无需 `apt-get -f`。
-Installed-Size: 13144
+Installed-Size: 13148
