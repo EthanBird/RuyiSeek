@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        # Remove user-level runtime artefacts that the package does not
+        # own. We intentionally leave /etc/skel alone.
+        for home in /home/*; do
+            [ -d "$home" ] || continue
+            user_config="$home/.config/ruyiseek"
+            if [ -d "$user_config" ]; then
+                rm -rf "$user_config" 2>/dev/null || true
+            fi
+        done
+        # Drop autostart entries we created in /etc/xdg/autostart that
+        # may have been copied to user profiles.
+        ;;
+    remove|upgrade|disappear)
+        ;;
+    *)
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

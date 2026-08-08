@@ -1,0 +1,30 @@
+ruyiseek (0.1.0-2) unstable; urgency=medium
+
+  * Switch release binaries from x86_64-unknown-linux-gnu to
+    x86_64-unknown-linux-musl. The three binaries (ruyi, ruyiseekd,
+    ruyiseek-ui) are now fully statically linked — no libc6,
+    libgcc-s1, libpthread, libm, libdl, or librt runtime
+    dependencies. The Depends line drops to libx11-6 only,
+    matching the requirements of UOS 20 / Debian 10 hosts where
+    libgcc-s1 cannot be installed.
+  * Link with rust-lld (the bundled LLD inside the Rust toolchain)
+    instead of the system GNU ld. rust-lld correctly handles the
+    rust runtime's _start auxiliary-vector relocation that system
+    ld was collapsing to address 0 (causing startup segfaults).
+  * Add packaging/deb/shim.c defining __dlopen/__dlclose/__dlerror
+    as weak stubs to satisfy any residual glibc libdl.a references
+    when cc-rs compiles vendored C dependencies.
+  * Update build.sh to also exclude shim.c / shim.o from the
+    binary .deb package (they are build-time only).
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sat, 08 Aug 2026 12:20:00 +0000
+
+ruyiseek (0.1.0-1) unstable; urgency=medium
+
+  * Initial release of RuyiSeek (phase A1.4 vertical slice).
+  * Includes ruyi CLI, ruyiseekd search daemon, and ruyiseek-ui
+    Slint launcher with X11 double-Ctrl, D-Bus single-instance,
+    tray, systemd-logind lock suppression, and versioned TOML
+    configuration.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Fri, 08 Aug 2026 03:00:00 +0000

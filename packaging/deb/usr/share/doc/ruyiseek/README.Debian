@@ -1,0 +1,64 @@
+如意寻 RuyiSeek (Debian package)
+================================
+
+本包是「如意寻」项目的 Debian 打包版本，针对统信 UOS 20（基于 Debian 10
+buster）和 Deepin 桌面环境构建。
+
+安装
+----
+
+    sudo apt install ./ruyiseek_0.1.0-1_amd64.deb
+
+或：
+
+    sudo dpkg -i ruyiseek_0.1.0-1_amd64.deb
+    sudo apt-get -f install   # 解决缺失依赖（如 libx11-6）
+
+使用
+----
+
+默认情况下，/etc/xdg/autostart/io.github.ethanbird.RuyiSeek.desktop
+会在每位用户登录后自动启动 ruyiseek-ui 的后台模式；DDE 托盘区应出现
+如意寻图标，左键点击唤出搜索窗口。
+
+如果想用 systemd --user 来管理服务：
+
+    systemctl --user enable --now ruyiseekd.service
+    systemctl --user enable --now ruyiseek-ui.service
+
+命令行：
+
+    ruyi --help
+    ruyiseekd --root ~/ --socket /tmp/ruyiseek/daemon.sock
+    ruyiseek-ui --toggle / --settings / --quit
+
+配置与运行时数据
+----------------
+
+  配置：       $XDG_CONFIG_HOME/ruyiseek/config.toml
+                （未设置 XDG_CONFIG_HOME 时回退到 $HOME/.config/ruyiseek/）
+  运行时 socket：$XDG_RUNTIME_DIR/ruyiseek/daemon.sock
+                （未设置时回退到 /tmp/ruyiseek-<uid>/）
+
+升级策略
+--------
+
+config.toml 与 config.toml.previous 被视为用户配置，不会被升级覆盖。如
+果将来版本引入新的 schema_version，daemon 会自动回退到 .previous 副本，
+仍无法恢复时才使用默认值。
+
+卸载
+----
+
+    sudo apt remove ruyiseek
+    sudo apt purge  ruyiseek    # 同时删除 ~/.config/ruyiseek
+
+已知限制（与上游一致）
+----------------------
+
+  * 索引范围仅在内存快照，未持久化；
+  * 拼音匹配、收藏、网络目录将在后续阶段提供；
+  * Wayland 下双击 Ctrl 需要 Portal/DDE 提供合规能力。
+
+详细设计见 /usr/share/doc/ruyiseek/README 和上游仓库：
+  https://github.com/EthanBird/RuyiSeek

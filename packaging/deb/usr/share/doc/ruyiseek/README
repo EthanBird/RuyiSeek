@@ -1,0 +1,93 @@
+# 如意寻 RuyiSeek
+
+如意寻是面向统信 UOS / Deepin 的本地文件搜索与全局启动器。目标是把高速文件索引、双击 Ctrl 呼出、应用与命令搜索、文件对话框跳转、托盘和后台服务整合成一个原生 Linux 桌面工具。
+
+完整产品与架构设计见 [开发设计文档](docs/如意寻_RuyiSeek_完整开发设计文档.md)。
+
+## 当前进度
+
+仓库目前完成了阶段 A1 的第四个纵向切片：
+
+- Rust workspace 及 `ruyiseekd`、`ruyiseek-ui`、`ruyi` 三个进程入口；
+- 可独立测试的双击 Ctrl 状态机，覆盖长按、组合键、自动重复和锁屏/全屏抑制；
+- 安全的目录快照扫描器，不跟随符号链接；
+- 文件/目录内存搜索、基础排序和 Top-K 截断；
+- 有长度上限的 Unix Socket 帧协议；
+- Slint 原生无边框启动器、异步查询、键盘选择、回车打开和错误状态；
+- X11/XInput2 原始按键监听，把双击 Ctrl 接入真实窗口显示/隐藏；
+- 通过 systemd-logind `LockedHint` 监听真实锁屏状态，锁屏时抑制全局唤醒；
+- 基于 D-Bus 的 GUI 单实例控制，重复启动会唤醒已有窗口；
+- StatusNotifierItem 系统托盘，支持显示、隐藏和完全退出；
+- 原生设置模式与版本化 TOML 配置，支持损坏回退和原子保存；
+- 登录后自动启动、双击 Ctrl、全屏抑制三个可配置选项，热键设置保存后立即生效；
+- 明确区分退出 UI 与完全退出，完全退出通过本地 IPC 正常停止 daemon；
+- daemon、CLI 与 GUI 之间可运行的端到端查询链路；
+- `--background` 常驻模式，以及 systemd 用户服务、D-Bus 激活和 Deepin XDG Autostart 配置。
+
+持久化增量索引和安装打包仍在后续迭代中。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口、搜索、单实例与托盘可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
+
+## 构建
+
+需要 Rust 1.75 或更高版本。
+
+```bash
+cargo build --workspace
+cargo test --workspace
+```
+
+## 本地演示
+
+先启动守护进程并为一个小目录建立临时内存快照：
+
+```bash
+cargo run -p ruyiseekd -- --root "$PWD"
+```
+
+另一个终端执行搜索：
+
+```bash
+cargo run -p ruyi-cli -- search 设计文档
+```
+
+启动真实搜索窗口（需要已运行的图形会话）：
+
+```bash
+cargo run -p ruyiseek-ui
+```
+
+以隐藏常驻模式启动，等待 X11 下双击 Ctrl：
+
+```bash
+cargo run -p ruyiseek-ui -- --background
+```
+
+再次执行 `ruyiseek-ui` 会通过会话 D-Bus 显示已经运行的窗口。也可以显式控制：
+
+```bash
+cargo run -p ruyiseek-ui -- --toggle
+cargo run -p ruyiseek-ui -- --hide
+cargo run -p ruyiseek-ui -- --settings
+cargo run -p ruyiseek-ui -- --exit-ui
+cargo run -p ruyiseek-ui -- --quit
+```
+
+托盘遵循 StatusNotifierItem/DBusMenu 协议，在 DDE 支持该协议的托盘区域中显示；左键显示窗口，菜单可打开设置、隐藏窗口、只退出界面或完全退出。只退出界面会保留索引服务，完全退出会等待 daemon 确认停止后退出 UI。
+
+基础设置保存在 `$XDG_CONFIG_HOME/ruyiseek/config.toml`，未设置该变量时使用 `$HOME/.config/ruyiseek/config.toml`。程序保存时会保留 `config.toml.previous`，并在当前配置损坏时回退。自动启动开关写入用户级 XDG Autostart 文件，只修改带有如意寻管理标记的条目。
+
+自动启动提供两种打包入口：systemd 用户服务和 `packaging/autostart` 下的 Deepin XDG Autostart 文件。安装器应按目标系统选择其中一种；即使用户误启用两种，D-Bus 单实例也会让后启动进程正常退出。锁屏状态无法确认时采取安全关闭策略：保留托盘和搜索，但停用全局双击 Ctrl。
+
+不连接显示服务器，仅验证双击 Ctrl 状态机：
+
+```bash
+cargo run -p ruyiseek-ui -- --demo-double-ctrl
+```
+
+默认 Socket 位于 `$XDG_RUNTIME_DIR/ruyiseek/daemon.sock`；未设置 `XDG_RUNTIME_DIR` 时使用 `/tmp/ruyiseek-<用户标识>/daemon.sock`。
+
+## 兼容目标
+
+- 统信 UOS / Deepin，x86_64 与 aarch64；
+- X11 上完整支持双击 Ctrl，Wayland 遵循 Portal / DDE 能力边界；
+- 不以 root 运行，不读取 `/dev/input`，不监听 TCP；
+- Debian 10 / UOS 兼容构建将在专用容器中执行，避免新 glibc 污染发布物。

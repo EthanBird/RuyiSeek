@@ -1,0 +1,13 @@
+[Unit]
+Description=RuyiSeek desktop integration
+After=graphical-session.target ruyiseekd.service
+Requires=ruyiseekd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ruyiseek-ui --background
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

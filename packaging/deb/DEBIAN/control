@@ -1,0 +1,29 @@
+Package: ruyiseek
+Version: 0.1.0-2
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: RuyiSeek contributors <ruyiseek@users.noreply.github.com>
+Homepage: https://github.com/EthanBird/RuyiSeek
+Vcs-Browser: https://github.com/EthanBird/RuyiSeek
+Vcs-Git: https://github.com/EthanBird/RuyiSeek.git
+Depends: libx11-6
+Recommends: systemd
+Suggests: xdg-utils, libdbus-1-3
+Description: 如意寻 — UOS/DDE 全局文件与应用启动器
+ 如意寻（RuyiSeek）是面向统信 UOS 与 Deepin（DDE）桌面的常驻本地
+ 文件搜索与全局启动器，提供双击 Ctrl 呼出、应用与文件统一搜索、
+ 系统托盘、设置中心和会话安全等能力。
+ .
+ 本包提供阶段 A1 第 4 个纵向切片：
+  * ruyi：命令行查询客户端（ping / status / search / stop）；
+  * ruyiseekd：常驻搜索守护进程，监听 $XDG_RUNTIME_DIR 下 Unix Socket；
+  * ruyiseek-ui：Slint 启动器，支持 D-Bus 单实例、托盘与双击 Ctrl；
+  * systemd --user 单元、D-Bus 激活服务与 XDG 自动启动条目。
+ .
+ 索引范围、收藏、拼音匹配、原生索引快照等能力将在后续版本中提供。
+ .
+ 本版本完全静态链接（musl libc），不再依赖系统 libc6 / libgcc-s1，
+ 可在 glibc ≥ 2.28 的 Debian/UOS 系统上直接 dpkg 安装，无 apt-get -f
+ 需要。
+Installed-Size: 13300

@@ -3,3 +3,14 @@
 *.log
 .idea/
 .vscode/
+
+# Build outputs from packaging/deb/build.sh
+/dist/
+# Binaries that build.sh `install`s into the staging tree — regenerated
+# on every build, never edited in place.
+/packaging/deb/usr/bin/
+
+# Build-time stubs for the musl build (compiled into binaries at
+# link time; not part of the source tree that gets reviewed).
+# Keep shim.c — it documents the workaround. Ignore shim.o.
+/packaging/deb/shim.o

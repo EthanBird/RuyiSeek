@@ -1,0 +1,25 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: ruyiseek
+Upstream-Contact: RuyiSeek contributors <ruyiseek@users.noreply.github.com>
+Source: https://github.com/EthanBird/RuyiSeek
+
+# Upstream license is to be decided by the repository owner. Until then,
+# the package redistributes the upstream source under the same terms
+# granted by the upstream repository.
+
+Files: *
+Copyright: 2026 RuyiSeek contributors
+License: LicenseRef-RuyiSeek-Pending
+  The upstream project has not yet chosen a final license. The full
+  source is available at https://github.com/EthanBird/RuyiSeek for
+  redistribution under the terms published there.
+
+Files: packaging/deb/etc/xdg/autostart/io.github.ethanbird.RuyiSeek.desktop
+       packaging/deb/usr/share/applications/io.github.ethanbird.RuyiSeek.desktop
+       packaging/deb/usr/share/dbus-1/services/io.github.ethanbird.RuyiSeek.service
+Copyright: 2026 RuyiSeek contributors
+License: LicenseRef-RuyiSeek-Pending
+
+Files: debian/*
+Copyright: 2026 RuyiSeek contributors
+License: LicenseRef-RuyiSeek-Pending

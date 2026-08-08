@@ -1,0 +1,50 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Reload D-Bus session service activation cache so the
+        # io.github.ethanbird.RuyiSeek.service becomes activatable.
+        if [ -d /run/user ]; then
+            for bus in /run/user/*/bus; do
+                [ -S "$bus" ] || continue
+                dbus-send --address="unix:path=$bus" --type=method_call \
+                    --dest=org.freedesktop.DBus / org.freedesktop.DBUS.ReloadConfig \
+                    >/dev/null 2>&1 || true
+            done
+        fi
+
+        # Try to enable the systemd user units for every logged-in user.
+        # This is best-effort: postinst runs as root, not as the user,
+        # so USERBASE discovery is approximate.
+        for uid_dir in /run/user/*; do
+            [ -d "$uid_dir" ] || continue
+            uid=$(basename "$uid_dir")
+            user=$(getent passwd "$uid" | cut -d: -f1)
+            [ -n "$user" ] || continue
+            loginctl enable-linger "$user" 2>/dev/null || true
+        done
+
+        cat <<'EOF'
+如意寻 RuyiSeek 已安装。
+
+下一步：
+  1. 注销并重新登录，使 XDG Autostart / D-Bus 激活生效。
+  2. 双击 Ctrl 唤出启动器；或在终端运行 `ruyiseek-ui --background`。
+  3. 设置窗口：`ruyiseek-ui --settings`。
+  4. CLI 查询：`ruyi search <关键词>`（需先启动 ruyiseekd）。
+
+首选用 systemd 用户单元管理后台服务：
+  systemctl --user enable --now ruyiseekd.service
+  systemctl --user enable --now ruyiseek-ui.service
+
+如需彻底卸载：apt remove ruyiseek
+EOF
+        ;;
+    *)
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
