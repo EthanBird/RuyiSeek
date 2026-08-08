@@ -24,3 +24,13 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = "warn"
 pedantic = "warn"
+
+# Release profiles deliberately switch to `panic = "abort"`. The default
+# `panic = "unwind"` pulls in `_Unwind_*` symbols whose only ABI-tagged
+# (GCC_3.0) provider is `libgcc_s.so.1`, which the `libgcc-s1` package
+# supplies on Debian-family hosts. See .cargo/config.toml for the rest
+# of the libgcc_s removal strategy. Debug profiles keep unwinding so
+# stack traces remain useful during development.
+[profile.release]
+panic = "abort"
+opt-level = 3

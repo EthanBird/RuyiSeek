@@ -1,0 +1,62 @@
+# --- libgcc_s.so.1 elimination: musl target via user-local musl-stage ---
+#
+# The release binaries on x86_64-unknown-linux-gnu pull in libgcc_s.so.1 at
+# runtime. The cause is dynamic ABI-tagged GCC_3.0 references
+# (`_Unwind_Resume`, `_Unwind_GetIP`, …) emitted by `std::backtrace_rs`.
+# These live in libgcc_s.so.1 exclusively; libgcc_eh.a and libgcc.a do
+# not contain them on Debian-family distros. Neither `panic=abort` nor
+# `-C link-arg=-static-libgcc` can remove the dependency. musl's libc.a
+# has its own unwinder, so the dynamic reference chain disappears.
+#
+# Strategy:
+#
+# 1. Build everything for x86_64-unknown-linux-musl. The Rust musl target
+#    bundles its own libc.a (which provides dlopen/dlsym/dlerror and
+#    a musl-internal unwinder) and therefore does not link against any
+#    system C library — libgcc_s.so.1, libc.so.6, libdl.so.2, etc. all
+#    disappear from the dependency set.
+# 2. `panic = "abort"` drops the panic_unwind shim and any
+#    `_Unwind_RaiseException` references that panic paths might emit.
+# 3. The vendored `libdbus` is compiled and linked via the musl-gcc
+#    wrapper at `/home/syc/musl-stage/x86_64-linux-musl-gcc`, which
+#    invokes the system gcc with `-specs`/`-B`/`-isystem`/`-L` flags
+#    that resolve headers and libraries from the staged musl sysroot.
+#    This produces dbus objects that link cleanly against musl's libc.a.
+# 4. Even with the wrapper, the rustc driver for the musl target invokes
+#    `/usr/bin/ld` for the final link by default, and system ld still
+#    searches `/usr/lib/x86_64-linux-gnu`, finding glibc's libdl.a
+#    whose dlopen.o/dlclose.o/dlerror.o are stubs that reference the
+#    private symbols __dlopen/__dlclose/__dlerror. We link the shim
+#    object ahead of any other libdl lookup so the symbols are defined
+#    and weak — musl's libc.a provides the real dlopen/dlclose/dlerror
+#    at runtime.
+# 5. The .cargo/env.sh helper script exports PATH so the wrapper is
+#    discoverable as `x86_64-linux-musl-gcc` without installing
+#    musl-tools system-wide (no sudo required).
+
+[build]
+target = "x86_64-unknown-linux-musl"
+
+[env]
+CC_x86_64_unknown_linux_musl = "x86_64-linux-musl-gcc"
+CXX_x86_64_unknown_linux_musl = "x86_64-linux-musl-gcc"
+AR_x86_64_unknown_linux_musl = "ar"
+
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+rustflags = [
+    "-C", "panic=abort",
+    "-C", "link-arg=/home/syc/RuyiSeek/packaging/deb/shim.o",
+    "-C", "link-arg=-Wl,--as-needed",
+]
+
+# Defense-in-depth for any cross-target build (e.g. CI building both
+# targets). Has no effect on the default musl build. Structurally
+# cannot remove libgcc_s.so.1 from glibc-linked binaries on Debian —
+# documented for completeness.
+[target.x86_64-unknown-linux-gnu]
+linker = "cc"
+rustflags = [
+    "-C", "panic=abort",
+    "-C", "link-arg=-static-libgcc",
+]
