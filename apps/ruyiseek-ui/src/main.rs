@@ -125,15 +125,23 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
     let poll_timer = install_ui_event_pump(
         &launcher,
         ui_receiver,
-        generation,
-        result_paths,
+        Rc::clone(&generation),
+        Rc::clone(&result_paths),
         Rc::clone(&visible),
         Rc::clone(&app_config),
         worker_sender.clone(),
     );
 
     if let Some(action) = mode.action() {
-        apply_desktop_action(&launcher, &visible, &app_config, &worker_sender, action);
+        apply_desktop_action(
+            &launcher,
+            &visible,
+            &app_config,
+            &worker_sender,
+            &result_paths,
+            &generation,
+            action,
+        );
     }
     slint::run_event_loop_until_quit()?;
     drop(poll_timer);
@@ -389,7 +397,15 @@ fn install_ui_event_pump(
                     }
                 },
                 UiEvent::Desktop(action) => {
-                    apply_desktop_action(&launcher, &visible, &app_config, &worker_sender, action);
+                    apply_desktop_action(
+                        &launcher,
+                        &visible,
+                        &app_config,
+                        &worker_sender,
+                        &result_paths,
+                        &generation,
+                        action,
+                    );
                 }
                 UiEvent::Arrow(arrow) if visible.get() => {
                     apply_arrow_to_selection(&launcher, &result_paths, arrow);
@@ -397,7 +413,7 @@ fn install_ui_event_pump(
                 UiEvent::Shutdown(Ok(())) => quit_ui(),
                 UiEvent::Shutdown(Err(error)) => {
                     eprintln!("ruyiseek-ui: 完全退出时停止后台服务失败：{error}");
-                    show_launcher(&launcher, &visible);
+                    show_launcher(&launcher, &visible, &result_paths, &generation);
                     launcher.set_status_text(format!("后台停止失败，尚未退出：{error}").into());
                 }
                 UiEvent::HotkeyIssue(message) if launcher.get_query().trim().is_empty() => {
@@ -468,16 +484,18 @@ fn apply_desktop_action(
     visible: &Cell<bool>,
     app_config: &RefCell<config::AppConfig>,
     worker_sender: &Sender<WorkerCommand>,
+    result_paths: &Rc<RefCell<Vec<PathBuf>>>,
+    generation: &Rc<Cell<u64>>,
     action: DesktopAction,
 ) {
     match action {
-        DesktopAction::Show => show_launcher(launcher, visible),
+        DesktopAction::Show => show_launcher(launcher, visible, result_paths, generation),
         DesktopAction::Hide => hide_launcher(launcher, visible),
         DesktopAction::Toggle => {
             if visible.get() {
                 hide_launcher(launcher, visible);
             } else {
-                show_launcher(launcher, visible);
+                show_launcher(launcher, visible, result_paths, generation);
             }
         }
         DesktopAction::Settings => show_settings(launcher, visible, app_config),
@@ -486,7 +504,7 @@ fn apply_desktop_action(
             hide_launcher(launcher, visible);
             if worker_sender.send(WorkerCommand::Shutdown).is_err() {
                 eprintln!("ruyiseek-ui: 后台控制线程已经停止");
-                show_launcher(launcher, visible);
+                show_launcher(launcher, visible, result_paths, generation);
                 launcher.set_status_text("后台控制线程异常，尚未退出".into());
             }
         }
@@ -518,19 +536,27 @@ fn quit_ui() {
     }
 }
 
-fn show_launcher(launcher: &LauncherWindow, visible: &Cell<bool>) {
+fn show_launcher(
+    launcher: &LauncherWindow,
+    visible: &Cell<bool>,
+    result_paths: &Rc<RefCell<Vec<PathBuf>>>,
+    generation: &Rc<Cell<u64>>,
+) {
     launcher.set_settings_mode(false);
     launcher.set_popup_index(-1);
-    // 每次重新唤起时清掉上次的输入与结果。set_query("") 经 LineEdit 的
-    // text <=> 双向绑定触发 on_query_edited，进而清空 results、归零
-    // selected-index、并把 generation 自增（丢弃在途搜索响应）。如果
-    // query 已经是 ""，on_query_edited 不会被触发；这时显式复位一次
-    // selected-index，避免上次选择项残留在空白列表里。
-    if launcher.get_query() != "" {
-        launcher.set_query("".into());
-    } else {
-        launcher.set_selected_index(0);
-    }
+    // 每次重新唤起时清掉上次的输入、结果与选择。注意：set_query("") 经
+    // LineEdit 双向绑定同步 LineEdit 的文本，但 LineEdit 的 edited 回调
+    // 只在用户键入时触发，编程式修改不会回调 —— 因此这里手动调用一遍
+    // 与 on_query_edited("") 等价的清空逻辑：清 results 模型、清内部
+    // result_paths 缓存、归零 selected-index、generation 自增丢弃在途
+    // 搜索响应。这样第二次双击 Ctrl 不会再展示上一次的搜索结果。
+    launcher.set_results(empty_model());
+    result_paths.borrow_mut().clear();
+    launcher.set_selected_index(0);
+    launcher.set_query("".into());
+    let next = generation.get().wrapping_add(1);
+    generation.set(next);
+    launcher.set_status_text("输入关键词开始搜索".into());
     match launcher.show() {
         Ok(()) => {
             visible.set(true);

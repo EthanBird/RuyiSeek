@@ -100,10 +100,36 @@ mkdir -p "$STAGING/usr/bin"
 # ship in the binary package.
 find "$STAGING" -maxdepth 1 -mindepth 1 \
     -not -name 'build.sh' \
+    -not -name 'icons' \
     \( -name '*.sh' -o -name '*.md' -o -name 'README*' -o -name 'shim.c' -o -name 'shim.o' \) -delete || true
 install -m 0755 "$STATIC_BIN_DIR/ruyiseekd"  "$STAGING/usr/bin/ruyiseekd"
 install -m 0755 "$DYN_BIN_DIR/ruyiseek-ui"    "$STAGING/usr/bin/ruyiseek-ui"
 install -m 0755 "$STATIC_BIN_DIR/ruyi"        "$STAGING/usr/bin/ruyi"
+
+# 安装图标：hicolor 多尺寸 + 可缩放 SVG（系统托盘使用代码生成的 ARGB 位图，
+# 见 apps/ruyiseek-ui/src/tray.rs 的 make_icon()）。SVG 源文件位于
+# packaging/icons/，PNG 是 build 时用 rsvg-convert 实时渲染的，避免把
+# 位图直接 check 进 git（体积大且重新生成成本低）。
+ICON_NAME="io.github.ethanbird.RuyiSeek"
+ICON_SRC_DIR="$ROOT_DIR/packaging/icons"
+ICON_SVG="$ICON_SRC_DIR/${ICON_NAME}.svg"
+if [ -f "$ICON_SVG" ]; then
+    install -d "$STAGING/usr/share/icons/hicolor/scalable/apps"
+    install -m 0644 "$ICON_SVG" \
+        "$STAGING/usr/share/icons/hicolor/scalable/apps/${ICON_NAME}.svg"
+
+    if command -v rsvg-convert >/dev/null 2>&1; then
+        for sz in 48 64 128 256; do
+            install -d "$STAGING/usr/share/icons/hicolor/${sz}x${sz}/apps"
+            rsvg-convert -w "$sz" -h "$sz" "$ICON_SVG" \
+                > "$STAGING/usr/share/icons/hicolor/${sz}x${sz}/apps/${ICON_NAME}.png"
+        done
+    else
+        echo "warning: rsvg-convert not found, skipping PNG icon sizes" >&2
+    fi
+else
+    echo "warning: icon SVG $ICON_SVG not found" >&2
+fi
 
 # Make sure maintainer scripts are executable
 chmod 0755 "$STAGING/DEBIAN/postinst" \

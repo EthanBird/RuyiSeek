@@ -79,14 +79,18 @@
   关闭路径：点击结果行、点击菜单项、编辑搜索框、进入设置面板、再次唤起 launcher，都会把 `popup-index` 复位回 -1。Suggests 加上 `xclip` 与 `wl-clipboard`，首次安装保持干净。
 - **daemon HOME 默认值**：见 A1.5 末条，已落入 v0.1.0-7。
 - **构建可重复性**：`packaging/deb/shim.c` 移到 `packaging/shim.c`，build.sh 每次 cargo 之前 `cc -c` 编译为 `packaging/deb/shim.o`，避免清理后第二次构建报 `cannot open shim.o`。
+- **点击空白处隐藏启动器（v0.1.0-9）**：Window 改为 960×600 透明无边框 + 始终置顶；外层 `dismiss-area` TouchArea 在 focus-scope 下方 z-order，吃掉空白点击并触发 `root.dismiss()`；卡片内部的 `card-bg-touch` 在搜索框/结果行之下，吃掉 padding 点击但只把焦点送回搜索框。两个 TouchArea 配合保证：点空白 → 隐藏；点卡片 padding → 不消失、只聚焦；点结果行 / 搜索框 → 沿用既有 activate / 光标处理。
+- **Esc 直接隐藏（v0.1.0-9）**：之前 Esc 是"先清空再隐藏"两段式，焦点卡的 key-pressed 现在单步调用 `root.dismiss()`，多余输入保留为空状态隐藏即可；用户想清空输入不隐藏时仍可用 Ctrl+L 或手动选中删除。
+- **第二次双击 Ctrl 不再保留上次结果（v0.1.0-9）**：Slint 1.6 的 `LineEdit::edited` 回调只在用户输入时触发，程序化 `set_query("")` 不会触发；因此 `show_launcher` 与 `apply_desktop_action` 现在显式接受 `result_paths` 与 `generation` 句柄，每次唤起时显式清空 results 模型、`result_paths` 向量、`selected-index`、query、`generation` 自增、`status_text` 重置为 idle。in-flight 的过期响应因 generation 不匹配被直接丢弃。
+- **新图标（v0.1.0-9）**：新增 `packaging/icons/io.github.ethanbird.RuyiSeek.svg` —— 64×64 viewBox 上的青蓝渐变（#2a8aa3 → #176b87）放大镜；`packaging/deb/build.sh` 安装到 `/usr/share/icons/hicolor/scalable/apps/` 之外，再用 `rsvg-convert` 现场渲染 48 / 64 / 128 / 256 PNG 到 `hicolor/<size>x<size>/apps/`，构建产物不污染 git（已加进 `.gitignore`）。`io.github.ethanbird.RuyiSeek.desktop` 的 `Icon=` 字段保持不变，hicolor 自动按主题查找。托盘位图（KSNI 只能拿 ARGB 数据流）走 `apps/ruyiseek-ui/src/tray.rs::make_icon()` 重写为透明背景 + 同色渐变环/柄，单测 `generated_icon_has_argb_pixels_and_expected_colors` 改为验证渐变两端色域都出现且旧的白环颜色已消失。
+- **极简搜索条（v0.1.0-9）**：去掉 42×42 的"寻"色块与 66×28 的"Ctrl ×2"提示芯片；搜索条回归单 `LineEdit`（高度 44px、字号 18、占位文末加省略号"…"），焦点卡高度公式相应从 `122 + N*54` 改为 `110 + N*54`。焦点卡 `x/y` 绑定 `(parent.width - self.width) / 2` 与 `(parent.height - self.height) / 2`，在 960×600 窗口内自动居中。
+- **设置面板居中（v0.1.0-9）**：`SettingsPanel` 显式指定 `width: 640px; height: 480px; x/y` 居中绑定，避免之前默认贴左上角。右键上下文菜单的 `x/y` 改为 `focus-scope.x/y + offset`，跟着卡片位置走。
+- **测试覆盖**：tray::tests 调整后 release profile 下 37 个单元测试全部通过（增加新图标 gradient 端点校验）。
 
 ## 下一步：阶段 A1.7——索引可观察性
 
 1. **结果标签细化**：当结果来自「最近打开」「固定应用」「命令历史」时给出不同的小标签，便于区分。
-2. **键盘 ESC 二次语义**：在 query 非空时清空，已有；下一步允许按住 Esc 直接隐藏 launcher，跳过清空步骤。
-3. **复制失败的可观测性**：当前 copy 路径只在 status bar 提示，下一步写入 stderr 便于从 `--background` 模式诊断。
-4. **剪贴板工具检测缓存**：每次启动器唤起都要 `Command::new` 试探 xclip / wl-copy；下一步把"已发现工具"缓存到 daemon 侧的 process-scoped `OnceCell`。
-5. **结果列表 ≥10 项的滚动**：当前 9 行硬上限由 `Math.min(results.length, 9)` 控制；未来若 daemon 返回 Top-K >9，再评估 ListView 滚动方案。
+2. **复制失败的可观测性**：当前 copy 路径只在 status bar 提示，下一步写入 stderr 便于从 `--background` 模式诊断。
 
 ## 当前限制
 

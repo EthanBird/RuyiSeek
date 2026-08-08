@@ -1,3 +1,70 @@
+ruyiseek (0.1.0-9) unstable; urgency=medium
+
+  * Click outside the launcher to hide. The launcher window is now
+    960x600, no-frame, always-on-top, and transparent between the
+    rounded card and the screen edges. A full-window TouchArea sits
+    below the focus-scope in z-order and is the only thing that
+    catches clicks on the empty backdrop; a separate TouchArea on the
+    card itself sits below the result rows and search input and
+    forwards focus back to the LineEdit when the user clicks on card
+    padding. Together they make: click outside -> dismiss; click on
+    card padding -> re-focus search; click on result row / search
+    input -> the existing handlers (activate / caret move). All
+    passes through the existing root.dismiss() callback so the D-Bus
+    session lock and idle rearm logic stay untouched.
+  * New icon. packaging/icons/io.github.ethanbird.RuyiSeek.svg is a
+    minimal magnifying glass with a teal-to-deep-teal linear gradient
+    (#2a8aa3 -> #176b87) that matches the launcher's accent color.
+    packacking/deb/build.sh installs:
+      - /usr/share/icons/hicolor/scalable/apps/<name>.svg
+      - /usr/share/icons/hicolor/{48,64,128,256}x{...}/apps/<name>.png
+        (rendered at build time with rsvg-convert, not committed)
+    The system tray icon (KSNI) does not load files so
+    apps/ruyiseek-ui/src/tray.rs::make_icon() is rewritten to match
+    the SVG palette: transparent background, gradient ring + handle
+    instead of the previous teal disc with a white ring. The unit
+    test generated_icon_has_argb_pixels_and_expected_colors now
+    verifies both gradient endpoints are present and the legacy
+    white ring color is gone.
+  * Minimalist search bar. The 42px "寻" icon and the 66x28 "Ctrl x2"
+    hint chip are removed from the launcher; the search bar is now a
+    single 720px-wide LineEdit with an ellipsis-trimmed placeholder
+    ("搜索文件、文件夹、应用或命令..."). The focus-scope height
+    formula drops from 122 + N*54 to 110 + N*54 to reflect the
+    shorter search bar, and the focus-scope is centered in the
+    960x600 window with x/y bindings so the card sits in the visual
+    middle on any screen size.
+  * Settings panel centering. The SettingsPanel is now a fixed
+    640x480 Rectangle with explicit x/y bindings to the window
+    center, so it no longer hugs the top-left corner of the screen.
+    The right-click context menu positions itself relative to the
+    focus-scope (x = focus-scope.x + 12, y = focus-scope.y + 82 + N*46)
+    so it lines up with the result row that was clicked regardless
+    of where the card sits in the window.
+  * Escape now hides the launcher directly. The previous
+    "clear-then-hide" two-step on Esc is replaced with a single
+    root.dismiss() call, so a stray Esc does not leave an empty
+    input + a hidden window. Users who still want to clear the
+    input without hiding can use Ctrl+L or select-and-delete.
+  * Bug fix: re-summoning the launcher with a second double-Ctrl no
+    longer keeps the previous result list visible. The Slint
+    LineEdit's edited() callback only fires on user input, so a
+    programmatic set_query("") does not by itself clear results.
+    show_launcher() and apply_desktop_action() now take the
+    result-paths + generation handles explicitly and:
+      - reset results to an empty Model
+      - clear result_paths
+      - reset selected-index to 0
+      - reset query to ""
+      - bump the search-response generation so any in-flight
+        callback from the daemon is discarded
+      - reset status text to the idle message
+    The second double-Ctrl therefore starts on a clean slate
+    instead of showing the previous results while the new query
+    is still in flight.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sat, 09 Aug 2026 00:20:00 +0000
+
 ruyiseek (0.1.0-8) unstable; urgency=medium
 
   * Right-click context menu on result rows. Slint 1.6 does not expose

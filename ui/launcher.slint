@@ -247,11 +247,34 @@ export component LauncherWindow inherits Window {
     in property <string> settings-status-text: "修改后点击保存";
 
     title: root.settings-mode ? "如意寻设置" : "如意寻";
-    width: root.settings-mode ? 640px : 720px;
-    height: root.settings-mode ? 480px : 122px + Math.min(root.results.length, 9) * 54px;
+    // 启动器面板始终占满整个屏幕，目的是让"点击面板外的空白区域"等价于
+    // "点击启动器以外的地方" —— 用户在屏幕任意空白处点击都直接隐藏。
+    // 真正的卡片（focus-scope）固定为 720 宽，按结果数动态算高度，并被
+    // 居中放置在窗口内。drop-shadow 需要的边距由 focus-scope 的居中位移
+    // 自然留出。
+    width: 960px;
+    height: 600px;
     no-frame: true;
     always-on-top: true;
     background: transparent;
+
+    // 最底层铺一张全窗口的"空白点击区"，命中后调用 dismiss() 隐藏启动器。
+    // 在 source 顺序上它先于 focus-scope 与 context-menu，所以焦点卡上的
+    // TouchArea / LineEdit / Rectangle 仍然优先吃事件；只有真正的"卡片
+    // 之外 + context-menu 之外"区域才会到这里。Slint 1.6 里 Window 的非
+    // 布局子元素不会自动拉伸，所以这里显式绑到 parent.width/height。
+    dismiss-area := Rectangle {
+        background: transparent;
+        width: parent.width;
+        height: parent.height;
+        dismiss-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => {
+                root.dismiss();
+            }
+        }
+    }
 
     focus-scope := FocusScope {
         // Slint 1.6 的 key 事件链 child-first：LineEdit 内部的 TextInput 占据
@@ -262,6 +285,13 @@ export component LauncherWindow inherits Window {
         // apps/ruyiseek-ui/src/main.rs::apply_arrow_to_selection，事件源是
         // crates/ruyiseek-platform/src/x11_hotkey.rs 的 on_arrow 回调（XInput2 raw stream）。
         visible: !root.settings-mode;
+        // 720 宽；高度按结果数算。把焦点卡居中放置在 960x600 窗口内。
+        // 高度公式：12 (top pad) + 44 (search bar) + 8 + (28 status 或 N*46 results)
+        // + 8 + 12 (bottom pad) ≈ 110 + N*54。
+        width: 720px;
+        height: 110px + Math.min(root.results.length, 9) * 54px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
         key-pressed(event) => {
             // Slint 1.6 的 .slint 端只暴露 event.text（string）和 event.modifiers，
             // 不能访问 event.key。Key.X 常量会隐式转成对应的 Unicode 字符（PUA）
@@ -290,12 +320,9 @@ export component LauncherWindow inherits Window {
                 return accept;
             }
             if (event.text == Key.Escape) {
-                if (root.query != "") {
-                    root.query = "";
-                    root.query-edited("");
-                } else {
-                    root.dismiss();
-                }
+                // 按 Esc 直接隐藏启动器，不再"先清空内容再隐藏"两段式。
+                // 用户若想清空当前输入，用 Ctrl+L 或手动选中删除。
+                root.dismiss();
                 return accept;
             }
             return reject;
@@ -311,35 +338,31 @@ export component LauncherWindow inherits Window {
             drop-shadow-offset-y: 10px;
             clip: true;
 
+            // 卡片"空白处点击吸收器"。放在最底层（source 顺序先于结果行 / 搜索
+            // 条），命中后将焦点送回搜索框 —— 这样：
+            //  - 点击 padding / 状态文字等无控件区域：不会触发外层 dismiss
+            //    TouchArea（从而不会意外隐藏），只会把焦点放回搜索框；
+            //  - 点击结果行 / 搜索框：被它们各自的 TouchArea / LineEdit 优先
+            //    吃掉，事件不到这里。
+            card-bg-touch := TouchArea {
+                clicked => {
+                    query-input.focus();
+                }
+            }
+
             VerticalLayout {
                 padding: 12px;
                 spacing: 8px;
 
                 HorizontalLayout {
-                    height: 62px;
-                    spacing: 12px;
-
-                    Rectangle {
-                        width: 42px;
-                        height: 42px;
-                        border-radius: 12px;
-                        background: #176b87;
-
-                        Text {
-                            text: "寻";
-                            color: white;
-                            font-size: 21px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
+                    height: 44px;
+                    spacing: 0px;
 
                     query-input := LineEdit {
-                        height: 42px;
+                        height: 44px;
                         text <=> root.query;
-                        placeholder-text: "搜索文件、文件夹、应用或命令";
-                        font-size: 19px;
+                        placeholder-text: "搜索文件、文件夹、应用或命令…";
+                        font-size: 18px;
 
                         edited(text) => {
                             root.popup-index = -1;
@@ -350,21 +373,6 @@ export component LauncherWindow inherits Window {
                             if (root.results.length > 0) {
                                 root.activate-result(root.selected-index);
                             }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 66px;
-                        height: 28px;
-                        border-radius: 8px;
-                        background: #e6edf3;
-
-                        Text {
-                            text: "Ctrl ×2";
-                            color: #536574;
-                            font-size: 11px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
                         }
                     }
                 }
@@ -469,15 +477,15 @@ export component LauncherWindow inherits Window {
     // 右键弹出的上下文菜单，定义在 Window 顶层（focus-scope 之外）以保证 z-order
     // 在结果行之上。Slint 1.6 没有内置 PopupMenu/MenuItem，这里手写一个浮层
     // 菜单：每个动作是一个 Rectangle + TouchArea，命中后回调到 Rust 并把
-    // popup-index 重置回 -1 完成关闭。
+    // popup-index 重置回 -1 完成关闭。位置相对 focus-scope 的左上角：focus-scope
+    // 已经用 x/y 居中放置，菜单同样相对 focus-scope 定位，保证在不同窗口大小下
+    // 菜单与被右键的结果行对齐。
     context-menu := Rectangle {
         visible: root.popup-index >= 0 && !root.settings-mode;
         width: 188px;
         height: 4 * 32px + 8px;
-        // 浮在主卡左侧、对应结果行的位置上。结果区起始 y 大约是
-        // 12 (外 padding) + 62 (搜索条) + 8 (spacing) = 82px。
-        x: 12px;
-        y: 82px + root.popup-index * 46px + 2px;
+        x: focus-scope.x + 12px;
+        y: focus-scope.y + 82px + root.popup-index * 46px + 2px;
         border-radius: 8px;
         background: #f7fafcee;
         border-color: #cbd7e3aa;
@@ -591,6 +599,11 @@ export component LauncherWindow inherits Window {
         double-ctrl-enabled <=> root.double-ctrl-enabled;
         suppress-in-fullscreen <=> root.suppress-in-fullscreen;
         status-text: root.settings-status-text;
+        // 与 focus-scope 同样的居中策略：固定 640x480，屏窗中央。
+        width: 640px;
+        height: 480px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
         close-settings => { root.close-settings(); }
         save-settings(launch-at-login, double-ctrl-enabled, suppress-in-fullscreen) => {
             root.save-settings(

@@ -119,18 +119,23 @@ impl Tray for RuyiTray {
 fn make_icon(size: i32) -> Icon {
     let width = usize::try_from(size).expect("tray icon size must be positive");
     let mut data = Vec::with_capacity(width * width * 4);
-    let center = size - 1;
-    let outer_radius = size - 2;
     let lens_center = size * 4 / 5;
     let lens_radius = size * 2 / 5;
     let lens_thickness = (size / 7).max(1);
 
+    // 渐变起止色与 packaging/icons/io.github.ethanbird.RuyiSeek.svg 一致：
+    //   左上  #2a8aa3 (rgb 42,138,163)
+    //   右下  #176b87 (rgb 23,107,135)
+    // 在 16/22/32 px 的托盘图标上也能看出来微妙过渡。
+    const START_R: f32 = 42.0;
+    const START_G: f32 = 138.0;
+    const START_B: f32 = 163.0;
+    const END_R: f32 = 23.0;
+    const END_G: f32 = 107.0;
+    const END_B: f32 = 135.0;
+
     for y in 0..size {
         for x in 0..size {
-            let outer_x = 2 * x - center;
-            let outer_y = 2 * y - center;
-            let inside = outer_x * outer_x + outer_y * outer_y <= outer_radius * outer_radius;
-
             let lens_x = 2 * x - lens_center;
             let lens_y = 2 * y - lens_center;
             let lens_distance = lens_x * lens_x + lens_y * lens_y;
@@ -143,12 +148,17 @@ fn make_icon(size: i32) -> Icon {
                 && x + y >= size * 6 / 5
                 && (x - y).abs() <= lens_thickness;
 
-            let pixel = if !inside {
-                [0, 0, 0, 0]
-            } else if ring || handle {
-                [255, 255, 255, 255]
+            // 渐变进度 t 用对角线坐标 (x + y) / (2 * (size-1))，从 0 到 1。
+            let denom = (2.0 * (size - 1) as f32).max(1.0);
+            let t = ((x + y) as f32 / denom).clamp(0.0, 1.0);
+
+            let pixel = if ring || handle {
+                let r = (START_R + (END_R - START_R) * t).round() as u8;
+                let g = (START_G + (END_G - START_G) * t).round() as u8;
+                let b = (START_B + (END_B - START_B) * t).round() as u8;
+                [255, r, g, b]
             } else {
-                [255, 24, 126, 148]
+                [0, 0, 0, 0]
             };
             data.extend_from_slice(&pixel);
         }
@@ -171,14 +181,37 @@ mod tests {
         assert_eq!(icon.width, 16);
         assert_eq!(icon.height, 16);
         assert_eq!(icon.data.len(), 16 * 16 * 4);
+
+        // 必须存在：透明像素（环 + 手柄以外的区域）
         assert!(icon.data.chunks_exact(4).any(|pixel| pixel == [0, 0, 0, 0]));
-        assert!(icon
-            .data
-            .chunks_exact(4)
-            .any(|pixel| pixel == [255, 24, 126, 148]));
-        assert!(icon
-            .data
-            .chunks_exact(4)
-            .any(|pixel| pixel == [255, 255, 255, 255]));
+
+        // 渐变端点验证。
+        //   16x16 网格里，环出现在距离中心² ∈ [16, 64]，手柄出现在 x≥8,y≥8 且
+        //   x+y≥19 且 |x-y|≤2。两个端点都是非整数 t，所以这里按"亮端近似 #2a8aa3"
+        //   和"暗端近似 #176b87"两个色域各出现一次来验证。
+        let pixels: Vec<&[u8]> = icon.data.chunks_exact(4).collect();
+        let mut unique: std::collections::BTreeMap<[u8; 4], usize> = std::collections::BTreeMap::new();
+        for p in &pixels {
+            let key = [p[0], p[1], p[2], p[3]];
+            *unique.entry(key).or_insert(0) += 1;
+        }
+        // 16x16 图标上 (0,0) 透明，所以不会到达 #2a8aa3 的严格端点。
+        // 实测亮端约 #26829c，暗端约 #176b87 (因为手柄出现在右下方向)。
+        // 注：ksni::Icon::data 字节序为 [A, R, G, B]。
+        let bright_count = unique
+            .iter()
+            .filter(|(p, _)| p[0] == 255 && p[1] >= 36 && p[1] <= 42 && p[2] >= 128 && p[2] <= 138)
+            .map(|(_, c)| *c)
+            .sum::<usize>();
+        let dark_count = unique
+            .iter()
+            .filter(|(p, _)| p[0] == 255 && p[1] <= 26 && p[2] <= 110)
+            .map(|(_, c)| *c)
+            .sum::<usize>();
+        assert!(bright_count > 0, "icon should contain bright gradient pixels near #2a8aa3");
+        assert!(dark_count > 0, "icon should contain dark gradient pixels near #176b87");
+
+        // 不该再出现透明白色（旧版是白环）
+        assert!(!pixels.iter().any(|p| *p == [255, 255, 255, 255]));
     }
 }

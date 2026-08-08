@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RuyiSeek 应用图标。
+  - 64x64 viewBox，透明背景；和 UOS/DDE 启动器图标网格对齐良好。
+  - 简洁的放大镜 + 手柄；青蓝渐变 (#2a8aa3 → #176b87) 与启动器内配色一致。
+  - 同时用于：
+      * /usr/share/icons/hicolor/scalable/apps/io.github.ethanbird.RuyiSeek.svg
+      * 系统设置"启动器"图标选择器
+      * 桌面的 .desktop 图标
+  - 任务栏托盘仍使用代码生成的 32x32 ARGB 位图（KSNI 不支持从文件加载），
+    见 apps/ruyiseek-ui/src/tray.rs 的 make_icon()。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="ruyi-glass" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a8aa3"/>
+      <stop offset="100%" stop-color="#176b87"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圆环：放大镜镜片 -->
+  <circle cx="26" cy="26" r="14"
+          fill="none"
+          stroke="url(#ruyi-glass)"
+          stroke-width="5"/>
+
+  <!-- 手柄：放大镜斜柄 -->
+  <line x1="37.0" y1="37.0" x2="51.0" y2="51.0"
+        stroke="url(#ruyi-glass)"
+        stroke-width="5"
+        stroke-linecap="round"/>
+</svg>
