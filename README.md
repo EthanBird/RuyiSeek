@@ -43,9 +43,9 @@ cargo test --workspace
 单文件 `.deb` 已自带所有运行时库依赖（`libc6`、`libgcc1`、`libx11-6` 等标准 GUI 栈），在统信 UOS 20 / Deepin / Debian 10+ 主机上直接装：
 
 ```bash
-sudo apt install ./dist/ruyiseek_0.1.0-6_amd64.deb
+sudo apt install ./dist/ruyiseek_0.1.0-7_amd64.deb
 # 或
-sudo dpkg -i dist/ruyiseek_0.1.0-6_amd64.deb
+sudo dpkg -i dist/ruyiseek_0.1.0-7_amd64.deb
 ```
 
 无需 `apt-get -f install`，也无需先编译。装完后登录桌面，托盘自动出现；双击 Ctrl 唤起启动器，回车打开搜索项。如需重新构建产物：
