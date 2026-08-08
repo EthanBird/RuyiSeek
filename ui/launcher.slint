@@ -224,6 +224,9 @@ component SettingsPanel inherits Rectangle {
 export component LauncherWindow inherits Window {
     callback query-edited(string);
     callback activate-result(int);
+    callback reveal-result(int);
+    callback copy-file(int);
+    callback copy-path(int);
     callback dismiss();
     callback save-settings(bool, bool, bool);
     callback close-settings();
@@ -236,6 +239,7 @@ export component LauncherWindow inherits Window {
     in property <string> status-text: "正在连接后台服务…";
     in-out property <string> query: "";
     in-out property <int> selected-index: 0;
+    in-out property <int> popup-index: -1;
     in-out property <bool> settings-mode: false;
     in-out property <bool> launch-at-login: false;
     in-out property <bool> double-ctrl-enabled: true;
@@ -338,6 +342,7 @@ export component LauncherWindow inherits Window {
                         font-size: 19px;
 
                         edited(text) => {
+                            root.popup-index = -1;
                             root.selected-index = 0;
                             root.query-edited(text);
                         }
@@ -385,9 +390,23 @@ export component LauncherWindow inherits Window {
                         : result-touch.has-hover ? #edf4f7 : transparent;
 
                     result-touch := TouchArea {
+                        // 左键：若右键菜单正打开，则只关闭菜单不触发打开；
+                        // 用户需二次点击才打开所选项，符合常见 UX。
+                        // 右键：选中该行并弹出上下文菜单，位置由 popup-index 计算。
                         clicked => {
                             root.selected-index = index;
-                            root.activate-result(index);
+                            if (root.popup-index < 0) {
+                                root.activate-result(index);
+                            } else {
+                                root.popup-index = -1;
+                            }
+                        }
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.right
+                                    && event.kind == PointerEventKind.up) {
+                                root.selected-index = index;
+                                root.popup-index = index;
+                            }
                         }
                     }
 
@@ -442,6 +461,125 @@ export component LauncherWindow inherits Window {
                             vertical-alignment: center;
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // 右键弹出的上下文菜单，定义在 Window 顶层（focus-scope 之外）以保证 z-order
+    // 在结果行之上。Slint 1.6 没有内置 PopupMenu/MenuItem，这里手写一个浮层
+    // 菜单：每个动作是一个 Rectangle + TouchArea，命中后回调到 Rust 并把
+    // popup-index 重置回 -1 完成关闭。
+    context-menu := Rectangle {
+        visible: root.popup-index >= 0 && !root.settings-mode;
+        width: 188px;
+        height: 4 * 32px + 8px;
+        // 浮在主卡左侧、对应结果行的位置上。结果区起始 y 大约是
+        // 12 (外 padding) + 62 (搜索条) + 8 (spacing) = 82px。
+        x: 12px;
+        y: 82px + root.popup-index * 46px + 2px;
+        border-radius: 8px;
+        background: #f7fafcee;
+        border-color: #cbd7e3aa;
+        border-width: 1px;
+        drop-shadow-blur: 14px;
+        drop-shadow-color: #10263a40;
+        drop-shadow-offset-y: 6px;
+        clip: true;
+
+        VerticalLayout {
+            padding: 4px;
+            spacing: 0px;
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: open-touch.has-hover ? #dcecf2 : transparent;
+
+                open-touch := TouchArea {
+                    clicked => {
+                        root.activate-result(root.popup-index);
+                        root.popup-index = -1;
+                    }
+                }
+
+                Text {
+                    text: "打开";
+                    color: #152735;
+                    font-size: 13px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 12px;
+                    width: parent.width - 24px;
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: reveal-touch.has-hover ? #dcecf2 : transparent;
+
+                reveal-touch := TouchArea {
+                    clicked => {
+                        root.reveal-result(root.popup-index);
+                        root.popup-index = -1;
+                    }
+                }
+
+                Text {
+                    text: "打开所在文件夹";
+                    color: #152735;
+                    font-size: 13px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 12px;
+                    width: parent.width - 24px;
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: copy-touch.has-hover ? #dcecf2 : transparent;
+
+                copy-touch := TouchArea {
+                    clicked => {
+                        root.copy-file(root.popup-index);
+                        root.popup-index = -1;
+                    }
+                }
+
+                Text {
+                    text: "复制文件";
+                    color: #152735;
+                    font-size: 13px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 12px;
+                    width: parent.width - 24px;
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: copy-path-touch.has-hover ? #dcecf2 : transparent;
+
+                copy-path-touch := TouchArea {
+                    clicked => {
+                        root.copy-path(root.popup-index);
+                        root.popup-index = -1;
+                    }
+                }
+
+                Text {
+                    text: "复制路径";
+                    color: #152735;
+                    font-size: 13px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 12px;
+                    width: parent.width - 24px;
                 }
             }
         }

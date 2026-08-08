@@ -197,6 +197,69 @@ fn install_ui_callbacks(
     });
 
     let weak_launcher = launcher.as_weak();
+    let reveal_paths = Rc::clone(result_paths);
+    let reveal_visible = Rc::clone(&visible);
+    launcher.on_reveal_result(move |index| {
+        let Some(launcher) = weak_launcher.upgrade() else {
+            return;
+        };
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
+        let Some(path) = reveal_paths.borrow().get(index).cloned() else {
+            return;
+        };
+        match reveal_in_file_manager(&path) {
+            Ok(()) => {
+                if let Err(error) = launcher.hide() {
+                    eprintln!("ruyiseek-ui: 隐藏启动器失败：{error}");
+                } else {
+                    reveal_visible.set(false);
+                }
+            }
+            Err(error) => {
+                launcher.set_status_text(format!("无法打开所在文件夹：{error}").into())
+            }
+        }
+    });
+
+    let weak_launcher = launcher.as_weak();
+    let copy_paths = Rc::clone(result_paths);
+    launcher.on_copy_file(move |index| {
+        let Some(launcher) = weak_launcher.upgrade() else {
+            return;
+        };
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
+        let Some(path) = copy_paths.borrow().get(index).cloned() else {
+            return;
+        };
+        match copy_file_to_clipboard(&path) {
+            Ok(()) => launcher.set_status_text("已复制文件到剪贴板".into()),
+            Err(error) => launcher.set_status_text(format!("复制文件失败：{error}").into()),
+        }
+    });
+
+    let weak_launcher = launcher.as_weak();
+    let copy_path_paths = Rc::clone(result_paths);
+    launcher.on_copy_path(move |index| {
+        let Some(launcher) = weak_launcher.upgrade() else {
+            return;
+        };
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
+        let Some(path) = copy_path_paths.borrow().get(index).cloned() else {
+            return;
+        };
+        match copy_path_to_clipboard(&path) {
+            Ok(()) => launcher.set_status_text("已复制路径到剪贴板".into()),
+            Err(error) => launcher.set_status_text(format!("复制路径失败：{error}").into()),
+        }
+    });
+
+    let weak_launcher = launcher.as_weak();
     launcher.on_dismiss(move || {
         let Some(launcher) = weak_launcher.upgrade() else {
             return;
@@ -441,6 +504,7 @@ fn show_settings(
     launcher.set_suppress_in_fullscreen(config.suppress_in_fullscreen);
     launcher.set_settings_status_text("修改后点击保存".into());
     launcher.set_settings_mode(true);
+    launcher.set_popup_index(-1);
     if let Err(error) = launcher.show() {
         eprintln!("ruyiseek-ui: 显示设置窗口失败：{error}");
     } else {
@@ -456,6 +520,17 @@ fn quit_ui() {
 
 fn show_launcher(launcher: &LauncherWindow, visible: &Cell<bool>) {
     launcher.set_settings_mode(false);
+    launcher.set_popup_index(-1);
+    // 每次重新唤起时清掉上次的输入与结果。set_query("") 经 LineEdit 的
+    // text <=> 双向绑定触发 on_query_edited，进而清空 results、归零
+    // selected-index、并把 generation 自增（丢弃在途搜索响应）。如果
+    // query 已经是 ""，on_query_edited 不会被触发；这时显式复位一次
+    // selected-index，避免上次选择项残留在空白列表里。
+    if launcher.get_query() != "" {
+        launcher.set_query("".into());
+    } else {
+        launcher.set_selected_index(0);
+    }
     match launcher.show() {
         Ok(()) => {
             visible.set(true);
@@ -734,6 +809,142 @@ fn open_path(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// 取出要送进文件管理器的"父目录"。当 path 是文件或叶子目录时就是它的
+/// parent()；对于已经是根的情况则直接落回 "/"，避免 xdg-open 拿到空路径。
+fn reveal_parent(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// 在文件管理器中显示给定路径所在的目录。仅取父目录后委托给 xdg-open，
+/// 由 desktop portal / dbus 选型（dde-file-manager、nautilus、thunar 等）。
+fn reveal_in_file_manager(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    Command::new("xdg-open")
+        .arg(reveal_parent(path))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    Ok(())
+}
+
+/// 把文件（而非路径字符串）放到剪贴板。文件管理器可以把剪贴板里的 URI
+/// 粘到目标目录，相当于"复制-粘贴"的源头。按 XDG Session Type 选择
+/// xclip（X11）或 wl-copy（Wayland）。需要 stdin pipe 把 URI 灌进去。
+fn copy_file_to_clipboard(path: &PathBuf) -> Result<(), String> {
+    let uri = format!("file://{}\n", path.display());
+    let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+    let candidates: &[(&str, &[&str])] = if session == "wayland" {
+        &[
+            ("wl-copy", &["--type", "text/uri-list"]),
+            ("xclip", &["-selection", "clipboard", "-t", "text/uri-list"]),
+        ]
+    } else {
+        &[
+            ("xclip", &["-selection", "clipboard", "-t", "text/uri-list"]),
+            ("wl-copy", &["--type", "text/uri-list"]),
+        ]
+    };
+    let mut last_err = String::new();
+    for (tool, args) in candidates {
+        let mut child = match Command::new(tool)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                last_err = format!("启动 {tool} 失败：{error}");
+                continue;
+            }
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            if let Err(error) = stdin.write_all(uri.as_bytes()) {
+                last_err = format!("写入 {tool} 失败：{error}");
+                continue;
+            }
+        }
+        match child.wait() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => {
+                last_err = format!("{tool} 退出状态 {status}");
+                continue;
+            }
+            Err(error) => {
+                last_err = format!("等待 {tool} 失败：{error}");
+                continue;
+            }
+        }
+    }
+    Err(if last_err.is_empty() {
+        "未找到 xclip 或 wl-copy，请先安装其一".to_string()
+    } else {
+        last_err
+    })
+}
+
+/// 把路径字符串放到剪贴板。优先级与文件复制相同，区别是写入的是
+/// 纯文本（无 URI 包装）。
+fn copy_path_to_clipboard(path: &PathBuf) -> Result<(), String> {
+    let text = format!("{}\n", path.display());
+    let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+    let candidates: &[(&str, &[&str])] = if session == "wayland" {
+        &[
+            ("wl-copy", &[]),
+            ("xclip", &["-selection", "clipboard"]),
+        ]
+    } else {
+        &[
+            ("xclip", &["-selection", "clipboard"]),
+            ("wl-copy", &[]),
+        ]
+    };
+    let mut last_err = String::new();
+    for (tool, args) in candidates {
+        let mut child = match Command::new(tool)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                last_err = format!("启动 {tool} 失败：{error}");
+                continue;
+            }
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            if let Err(error) = stdin.write_all(text.as_bytes()) {
+                last_err = format!("写入 {tool} 失败：{error}");
+                continue;
+            }
+        }
+        match child.wait() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => {
+                last_err = format!("{tool} 退出状态 {status}");
+                continue;
+            }
+            Err(error) => {
+                last_err = format!("等待 {tool} 失败：{error}");
+                continue;
+            }
+        }
+    }
+    Err(if last_err.is_empty() {
+        "未找到 xclip 或 wl-copy，请先安装其一".to_string()
+    } else {
+        last_err
+    })
+}
+
 fn connection_message(error: impl std::fmt::Display) -> String {
     format!("无法连接后台服务：{error}。请先启动 ruyiseekd")
 }
@@ -919,5 +1130,24 @@ mod tests {
     fn rejects_conflicting_control_modes() {
         let error = parse_args(args(&["--background", "--quit"])).unwrap_err();
         assert_eq!(error.to_string(), "只能指定一个启动/控制选项");
+    }
+
+    #[test]
+    fn reveal_parent_strips_one_path_component() {
+        use super::reveal_parent;
+        use std::path::Path;
+
+        // 普通文件：父目录
+        assert_eq!(
+            reveal_parent(Path::new("/home/syc/RuyiSeek/README.md")),
+            Path::new("/home/syc/RuyiSeek")
+        );
+        // 已经是根的文件名：空 parent 落回 /
+        assert_eq!(reveal_parent(Path::new("foo.txt")), Path::new("/"));
+        // 叶子目录：父目录
+        assert_eq!(
+            reveal_parent(Path::new("/var/log")),
+            Path::new("/var")
+        );
     }
 }
