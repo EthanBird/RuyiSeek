@@ -52,6 +52,18 @@ rustflags = [
     "-C", "link-arg=/home/syc/RuyiSeek/packaging/deb/shim.o",
     "-C", "link-arg=--as-needed",
 ]
+# Cargo passes `-l <crate>` to rust-lld for native deps. The
+# libloading crate (used by ruyiseek-platform tests for dlopen/dlsym)
+# asks for `-ldl`, but rust-lld cannot find it without an explicit
+# `-L` for the staged musl sysroot. The test-only flag below is
+# honored only when the test harness links (it does not affect
+# release builds because rust-lld ignores `-ldl` when the binary
+# pulls no dl* symbols).
+#
+# Test note: `cargo test` for x86_64-unknown-linux-musl requires
+# `RUSTFLAGS=` (empty) to be exported because panic=abort in the
+# rustflags above is incompatible with `cargo test` without the
+# nightly `-Zpanic_abort_tests`.
 
 # Defense-in-depth for any cross-target build (e.g. CI building both
 # targets). Has no effect on the default musl build. Structurally
