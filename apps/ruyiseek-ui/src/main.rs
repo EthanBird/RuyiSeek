@@ -4,6 +4,7 @@ use ruyiseek_platform::hotkey::{
     KeyState,
 };
 use ruyiseek_platform::x11_hotkey::DoubleCtrlControl;
+use ruyiseek_platform::x11_clipboard::{set_clipboard as native_set_clipboard, ClipboardMime, ClipboardOwner};
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use std::cell::{Cell, RefCell};
 use std::error::Error;
@@ -29,7 +30,7 @@ mod session_lock;
 mod tray;
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
-const SEARCH_LIMIT: usize = 9;
+const SEARCH_LIMIT: usize = 50;
 const UI_POLL_INTERVAL: Duration = Duration::from_millis(16);
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -94,6 +95,10 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
     let visible = Rc::new(Cell::new(false));
     let generation = Rc::new(Cell::new(0_u64));
     let result_paths = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
+    // 上一次的 CLIPBOARD owner：UI 内随时可能被新一次复制替换；程序退出时
+    // 由 Drop 主动释放，让 X server 把 owner 立刻改成 None，避免过时的
+    // 内容还在剪贴板里挂着。
+    let clipboard_owner: Rc<RefCell<Option<ClipboardOwner>>> = Rc::new(RefCell::new(None));
 
     let (worker_sender, worker_receiver) = mpsc::channel();
     let _search_worker = spawn_search_worker(worker_receiver, ui_sender.clone());
@@ -105,6 +110,7 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
         &generation,
         &result_paths,
         Rc::clone(&visible),
+        Rc::clone(&clipboard_owner),
     );
     install_settings_callbacks(
         &launcher,
@@ -154,6 +160,7 @@ fn install_ui_callbacks(
     generation: &Rc<Cell<u64>>,
     result_paths: &Rc<RefCell<Vec<PathBuf>>>,
     visible: Rc<Cell<bool>>,
+    clipboard_owner: Rc<RefCell<Option<ClipboardOwner>>>,
 ) {
     let weak_launcher = launcher.as_weak();
     let callback_generation = Rc::clone(generation);
@@ -233,6 +240,7 @@ fn install_ui_callbacks(
 
     let weak_launcher = launcher.as_weak();
     let copy_paths = Rc::clone(result_paths);
+    let copy_clipboard = Rc::clone(&clipboard_owner);
     launcher.on_copy_file(move |index| {
         let Some(launcher) = weak_launcher.upgrade() else {
             return;
@@ -243,7 +251,7 @@ fn install_ui_callbacks(
         let Some(path) = copy_paths.borrow().get(index).cloned() else {
             return;
         };
-        match copy_file_to_clipboard(&path) {
+        match copy_file_to_clipboard(&path, Rc::clone(&copy_clipboard)) {
             Ok(()) => launcher.set_status_text("已复制文件到剪贴板".into()),
             Err(error) => launcher.set_status_text(format!("复制文件失败：{error}").into()),
         }
@@ -251,6 +259,7 @@ fn install_ui_callbacks(
 
     let weak_launcher = launcher.as_weak();
     let copy_path_paths = Rc::clone(result_paths);
+    let copy_path_clipboard = Rc::clone(&clipboard_owner);
     launcher.on_copy_path(move |index| {
         let Some(launcher) = weak_launcher.upgrade() else {
             return;
@@ -261,7 +270,7 @@ fn install_ui_callbacks(
         let Some(path) = copy_path_paths.borrow().get(index).cloned() else {
             return;
         };
-        match copy_path_to_clipboard(&path) {
+        match copy_path_to_clipboard(&path, Rc::clone(&copy_path_clipboard)) {
             Ok(()) => launcher.set_status_text("已复制路径到剪贴板".into()),
             Err(error) => launcher.set_status_text(format!("复制路径失败：{error}").into()),
         }
@@ -857,118 +866,37 @@ fn reveal_in_file_manager(path: &PathBuf) -> Result<(), Box<dyn Error>> {
 }
 
 /// 把文件（而非路径字符串）放到剪贴板。文件管理器可以把剪贴板里的 URI
-/// 粘到目标目录，相当于"复制-粘贴"的源头。按 XDG Session Type 选择
-/// xclip（X11）或 wl-copy（Wayland）。需要 stdin pipe 把 URI 灌进去。
-fn copy_file_to_clipboard(path: &PathBuf) -> Result<(), String> {
+/// 粘到目标目录，相当于"复制-粘贴"的源头。完全用纯 Rust 实现 X11
+/// CLIPBOARD 协议（见 ruyiseek_platform::x11_clipboard），不再依赖
+/// xclip/wl-copy，这样离线机器零依赖就能复制。
+fn copy_file_to_clipboard(
+    path: &PathBuf,
+    slot: Rc<RefCell<Option<ClipboardOwner>>>,
+) -> Result<(), String> {
     let uri = format!("file://{}\n", path.display());
-    let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
-    let candidates: &[(&str, &[&str])] = if session == "wayland" {
-        &[
-            ("wl-copy", &["--type", "text/uri-list"]),
-            ("xclip", &["-selection", "clipboard", "-t", "text/uri-list"]),
-        ]
-    } else {
-        &[
-            ("xclip", &["-selection", "clipboard", "-t", "text/uri-list"]),
-            ("wl-copy", &["--type", "text/uri-list"]),
-        ]
-    };
-    let mut last_err = String::new();
-    for (tool, args) in candidates {
-        let mut child = match Command::new(tool)
-            .args(*args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(error) => {
-                last_err = format!("启动 {tool} 失败：{error}");
-                continue;
-            }
-        };
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            if let Err(error) = stdin.write_all(uri.as_bytes()) {
-                last_err = format!("写入 {tool} 失败：{error}");
-                continue;
-            }
-        }
-        match child.wait() {
-            Ok(status) if status.success() => return Ok(()),
-            Ok(status) => {
-                last_err = format!("{tool} 退出状态 {status}");
-                continue;
-            }
-            Err(error) => {
-                last_err = format!("等待 {tool} 失败：{error}");
-                continue;
-            }
-        }
+    if let Some(prev) = slot.borrow_mut().take() {
+        drop(prev);
     }
-    Err(if last_err.is_empty() {
-        "未找到 xclip 或 wl-copy，请先安装其一".to_string()
-    } else {
-        last_err
-    })
+    let owner = native_set_clipboard(uri.into_bytes(), ClipboardMime::UriList)
+        .map_err(|error| format!("写入 CLIPBOARD 失败：{error}"))?;
+    *slot.borrow_mut() = Some(owner);
+    Ok(())
 }
 
-/// 把路径字符串放到剪贴板。优先级与文件复制相同，区别是写入的是
-/// 纯文本（无 URI 包装）。
-fn copy_path_to_clipboard(path: &PathBuf) -> Result<(), String> {
+/// 把路径字符串放到剪贴板。区别是写入的是纯文本（无 URI 包装），
+/// 适合"把当前路径贴到终端"这种场景。
+fn copy_path_to_clipboard(
+    path: &PathBuf,
+    slot: Rc<RefCell<Option<ClipboardOwner>>>,
+) -> Result<(), String> {
     let text = format!("{}\n", path.display());
-    let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
-    let candidates: &[(&str, &[&str])] = if session == "wayland" {
-        &[
-            ("wl-copy", &[]),
-            ("xclip", &["-selection", "clipboard"]),
-        ]
-    } else {
-        &[
-            ("xclip", &["-selection", "clipboard"]),
-            ("wl-copy", &[]),
-        ]
-    };
-    let mut last_err = String::new();
-    for (tool, args) in candidates {
-        let mut child = match Command::new(tool)
-            .args(*args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(error) => {
-                last_err = format!("启动 {tool} 失败：{error}");
-                continue;
-            }
-        };
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            if let Err(error) = stdin.write_all(text.as_bytes()) {
-                last_err = format!("写入 {tool} 失败：{error}");
-                continue;
-            }
-        }
-        match child.wait() {
-            Ok(status) if status.success() => return Ok(()),
-            Ok(status) => {
-                last_err = format!("{tool} 退出状态 {status}");
-                continue;
-            }
-            Err(error) => {
-                last_err = format!("等待 {tool} 失败：{error}");
-                continue;
-            }
-        }
+    if let Some(prev) = slot.borrow_mut().take() {
+        drop(prev);
     }
-    Err(if last_err.is_empty() {
-        "未找到 xclip 或 wl-copy，请先安装其一".to_string()
-    } else {
-        last_err
-    })
+    let owner = native_set_clipboard(text.into_bytes(), ClipboardMime::Text)
+        .map_err(|error| format!("写入 CLIPBOARD 失败：{error}"))?;
+    *slot.borrow_mut() = Some(owner);
+    Ok(())
 }
 
 fn connection_message(error: impl std::fmt::Display) -> String {

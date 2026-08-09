@@ -22,3 +22,9 @@
 # icons installed into the .deb staging tree are regenerated on every
 # build; only the SVG in packaging/icons/ is the canonical source.
 /packaging/deb/usr/share/icons/
+
+# Shared libraries + dynamic linker copied into the .deb staging tree
+# by packaging/deb/bundle-libs.sh (re-stamped from /lib/x86_64-linux-gnu
+# on every build). The authoritative copies live on the build host, the
+# .deb ships them, and the staging dir is just a checkout scratch.
+/packaging/deb/usr/lib/ruyiseek/

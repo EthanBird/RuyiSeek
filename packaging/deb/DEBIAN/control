@@ -1,5 +1,5 @@
 Package: ruyiseek
-Version: 0.1.0-10
+Version: 0.1.0-11
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -9,7 +9,7 @@ Vcs-Browser: https://github.com/EthanBird/RuyiSeek
 Vcs-Git: https://github.com/EthanBird/RuyiSeek.git
 Depends: libc6 (>= 2.28)
 Recommends: systemd
-Suggests: xdg-utils, libdbus-1-3, xclip, wl-clipboard
+Suggests: xdg-utils, libdbus-1-3
 Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  如意寻（RuyiSeek）是面向统信 UOS 与 Deepin（DDE）桌面的常驻本地
  文件搜索与全局启动器，提供双击 Ctrl 呼出、应用与文件统一搜索、
@@ -37,4 +37,10 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  DT_RPATH 已 patchelf 到该目录；离线（无 apt 仓库）机器上
  `dpkg -i ./xxx.deb` 即可，不依赖 apt 拉任何运行时依赖（仅 Depends
  `libc6 (>= 2.28)`，用于 ldconfig 与 dynamic loader 注册）。
-Installed-Size: 13564
+ .
+ v0.1.0-11 起 `ruyiseek-ui` 的"复制文件 / 复制路径"完全用纯 Rust
+ 实现的 X11 CLIPBOARD 协议，不再 spawn xclip/wl-copy；启动器结果
+ 列表最多露 10 行 + Flickable 滚动，搜索结果上限从 9 提到 50；
+ 查询引擎支持多关键词 AND、首字母 acronym 命中、按 / 切段的路径
+ 段位加权。
+Installed-Size: 13660

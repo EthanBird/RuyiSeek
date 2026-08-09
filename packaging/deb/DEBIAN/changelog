@@ -1,3 +1,35 @@
+ruyiseek (0.1.0-11) unstable; urgency=medium
+
+  * Native X11 CLIPBOARD. "复制文件 / 复制路径" right-click menu no
+    longer spawns xclip / wl-copy. ruyiseek-ui now implements the
+    X11 CLIPBOARD selection protocol in pure Rust (crates/ruyiseek-
+    platform/src/x11_clipboard.rs, ~280 lines, depends only on
+    x11rb which is already pulled by x11_hotkey). A daemon thread
+    holds CLIPBOARD until the user pastes or a 5-minute hard timeout
+    elapses, advertising text/uri-list / UTF8_STRING / text / TEXT /
+    TARGETS / MULTIPLE. Round-trip verified against a second x11rb
+    connection (see examples/clipboard_round_trip.rs). This unblocks
+    the offline-machine pain where UOS images ship without xclip:
+    dpkg -i ruyiseek_0.1.0-11_amd64.deb now yields working copy
+    menus out of the box. Suggests drops xclip / wl-clipboard.
+  * Scrollable result list. SEARCH_LIMIT raised from 9 to 50; the
+    result panel is now a Flickable that shows up to 10 rows (=
+    visible-rows property) and scrolls the rest. Window height
+    capped accordingly (76 + min(n, 10) * 54 px) so the launcher
+    never grows past the screen. The context menu's y is offset by
+    root.results-viewport-y so right-clicking a scrolled-out row
+    still anchors the menu to that row.
+  * Smarter query engine (crates/ruyiseek-query). Multi-token AND
+    semantics: "report 2024" only matches files whose name OR path
+    hits every token. Single-token scoring is layered: exact >
+    prefix > substring > path-segment prefix (0.62) > path-segment
+    substring (0.50) > name subsequence density (0.48–0.66) >
+    raw-path substring (0.30). All-uppercase queries (≥2 letters)
+    are also tried as path-segment initials, so "RSU" matches
+    /ruyiseek/services/ui/x.txt. 7 unit tests pass.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>
+
 ruyiseek (0.1.0-10) unstable; urgency=medium
 
   * Offline-friendly install. The .deb no longer Requires libx11-6,

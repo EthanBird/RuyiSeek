@@ -245,6 +245,14 @@ export component LauncherWindow inherits Window {
     in-out property <bool> double-ctrl-enabled: true;
     in-out property <bool> suppress-in-fullscreen: true;
     in property <string> settings-status-text: "修改后点击保存";
+    // 结果 Flickable 当前滚出去的像素数，context-menu 用这个来对齐被
+    // 右键的行，而不是跟着 viewport 漂走。在 Flickable 内部通过
+    // `<=>` 双向绑定到 `results_flickable.viewport-y`，这样滑块
+    // 一动 context-menu 立刻知道。
+    in-out property <length> results-viewport-y: 0;
+    // 同时露在屏幕上的结果行数上限（超出部分在 Flickable 内滚动）。
+    // 默认 10 行 ≈ 540px 高，再多就把 960x600 的居中窗口顶到屏幕外了。
+    in-out property <int> visible-rows: 10;
 
     title: root.settings-mode ? "如意寻设置" : "如意寻";
     // 启动器面板始终占满整个屏幕，目的是让"点击面板外的空白区域"等价于
@@ -289,7 +297,10 @@ export component LauncherWindow inherits Window {
         // 高度公式：12 (top pad) + 44 (search bar) + 8 + (28 status 或 N*46 results)
         // + 8 + 12 (bottom pad) ≈ 110 + N*54。
         width: 720px;
-        height: 110px + Math.min(root.results.length, 9) * 54px;
+        // 窗口高度：搜索栏 12+44、底部 padding 12+8 固定 ~76；中间留给结果
+        // 区域，但结果区最大只露 VISIBLE_ROWS 行（其余在 Flickable 里滚动），
+        // 避免 50 条结果把窗口撑得比屏幕还高。每行 46px + 间距 8px。
+        height: 76px + Math.min(root.results.length, root.visible-rows) * 54px;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         key-pressed(event) => {
@@ -390,83 +401,98 @@ export component LauncherWindow inherits Window {
                     }
                 }
 
-                for result[index] in root.results : Rectangle {
-                    height: 46px;
-                    border-radius: 10px;
-                    background: index == root.selected-index
-                        ? #dcecf2
-                        : result-touch.has-hover ? #edf4f7 : transparent;
+                // 结果列表：results 最多 SEARCH_LIMIT=50 条，窗口里
+                // 最多露 visible-rows 行（默认 10），其余通过 Flickable
+                // 滚动查看。Flickable 的 viewport-y 实时反映滚动位置，
+                // 上下文菜单位置要减去这个偏移，否则菜单会跟着 viewport
+                // 漂走。
+                if root.results.length > 0 : results_flickable := Flickable {
+                    height: Math.min(root.results.length, root.visible-rows) * 46px;
+                    viewport-height: root.results.length * 46px;
+                    // 鼠标滚轮不会触发焦点转移，键盘 PageUp/PageDown
+                    // 由 focus-scope.key-pressed 接管。
+                    viewport-y <=> root.results-viewport-y;
+                    VerticalLayout {
+                        spacing: 0px;
+                        for result[index] in root.results : Rectangle {
+                            height: 46px;
+                            border-radius: 10px;
+                            background: index == root.selected-index
+                                ? #dcecf2
+                                : result-touch.has-hover ? #edf4f7 : transparent;
 
-                    result-touch := TouchArea {
-                        // 左键：若右键菜单正打开，则只关闭菜单不触发打开；
-                        // 用户需二次点击才打开所选项，符合常见 UX。
-                        // 右键：选中该行并弹出上下文菜单，位置由 popup-index 计算。
-                        clicked => {
-                            root.selected-index = index;
-                            if (root.popup-index < 0) {
-                                root.activate-result(index);
-                            } else {
-                                root.popup-index = -1;
-                            }
-                        }
-                        pointer-event(event) => {
-                            if (event.button == PointerEventButton.right
-                                    && event.kind == PointerEventKind.up) {
-                                root.selected-index = index;
-                                root.popup-index = index;
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 10px;
-                        spacing: 10px;
-
-                        Rectangle {
-                            width: 34px;
-                            height: 34px;
-                            border-radius: 9px;
-                            background: result.kind == "文件夹" ? #d9eee7 : #e8edf2;
-
-                            Text {
-                                text: result.kind == "文件夹" ? "夹" : "文";
-                                color: result.kind == "文件夹" ? #26765e : #52697b;
-                                font-size: 14px;
-                                font-weight: 600;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        VerticalLayout {
-                            spacing: 1px;
-
-                            Text {
-                                text: result.title;
-                                color: #152735;
-                                font-size: 14px;
-                                font-weight: index == root.selected-index ? 600 : 400;
-                                overflow: elide;
-                                vertical-alignment: bottom;
+                            result-touch := TouchArea {
+                                // 左键：若右键菜单正打开，则只关闭菜单不触发打开；
+                                // 用户需二次点击才打开所选项，符合常见 UX。
+                                // 右键：选中该行并弹出上下文菜单，位置由 popup-index 计算。
+                                clicked => {
+                                    root.selected-index = index;
+                                    if (root.popup-index < 0) {
+                                        root.activate-result(index);
+                                    } else {
+                                        root.popup-index = -1;
+                                    }
+                                }
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.right
+                                            && event.kind == PointerEventKind.up) {
+                                        root.selected-index = index;
+                                        root.popup-index = index;
+                                    }
+                                }
                             }
 
-                            Text {
-                                text: result.path;
-                                color: #71818e;
-                                font-size: 11px;
-                                overflow: elide;
-                                vertical-alignment: top;
-                            }
-                        }
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 10px;
+                                spacing: 10px;
 
-                        Text {
-                            width: 46px;
-                            text: result.score;
-                            color: #81909b;
-                            font-size: 10px;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
+                                Rectangle {
+                                    width: 34px;
+                                    height: 34px;
+                                    border-radius: 9px;
+                                    background: result.kind == "文件夹" ? #d9eee7 : #e8edf2;
+
+                                    Text {
+                                        text: result.kind == "文件夹" ? "夹" : "文";
+                                        color: result.kind == "文件夹" ? #26765e : #52697b;
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    spacing: 1px;
+
+                                    Text {
+                                        text: result.title;
+                                        color: #152735;
+                                        font-size: 14px;
+                                        font-weight: index == root.selected-index ? 600 : 400;
+                                        overflow: elide;
+                                        vertical-alignment: bottom;
+                                    }
+
+                                    Text {
+                                        text: result.path;
+                                        color: #71818e;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                        vertical-alignment: top;
+                                    }
+                                }
+
+                                Text {
+                                    width: 46px;
+                                    text: result.score;
+                                    color: #81909b;
+                                    font-size: 10px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
                         }
                     }
                 }
@@ -485,7 +511,10 @@ export component LauncherWindow inherits Window {
         width: 188px;
         height: 4 * 32px + 8px;
         x: focus-scope.x + 12px;
-        y: focus-scope.y + 82px + root.popup-index * 46px + 2px;
+        // viewport-y 是结果区 Flickable 当前滚出去的像素数；菜单
+        // 必须跟着滚动，否则用户滚到第 30 行右键，菜单还会停在
+        // 第 popup-index 行的位置上，完全错位。
+        y: focus-scope.y + 82px + root.popup-index * 46px + 2px - root.results-viewport-y;
         border-radius: 8px;
         background: #f7fafcee;
         border-color: #cbd7e3aa;
