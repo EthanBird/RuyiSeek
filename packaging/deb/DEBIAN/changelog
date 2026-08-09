@@ -1,3 +1,42 @@
+ruyiseek (0.1.0-10) unstable; urgency=medium
+
+  * Offline-friendly install. The .deb no longer Requires libx11-6,
+    libxcb1, libxi6, libxcursor1, libx11-xcb1, libxkbcommon0,
+    libfontconfig1, libstdc++6 — every shared library ruyiseek-ui needs
+    at runtime (28 files: glibc base stack + X11 client stack + font
+    stack, totalling ~268 KiB plus the dynamic linker) is now bundled
+    into /usr/lib/ruyiseek/ and the binary's PT_INTERP / DT_RPATH are
+    rewritten by patchelf to that path. Install on a target machine
+    with no network access to apt mirrors now works without any
+    Depends-driven `apt install` fetch. Depends is reduced to a single
+    package, libc6 (>= 2.28), which is present on every supported
+    base (UOS 20 / DDE / Debian 10+) and only exists as a sanity
+    guard.
+  * packaging/deb/bundle-libs.sh is the new entry point. It walks
+    the transitive closure of SONAME deps starting from the original
+    Depends list plus libstdc++/libgcc_s (used by the C++ fontconfig
+    shim and Rust runtime), copies each (preserving SONAME symlinks
+    with cp -P), copies the real ld-2.28.so file behind the
+    ld-linux-x86-64.so.2 symlink (so the PT_INTERP target is not a
+    dangling link on the target machine), and patchelfs
+    ruyiseek-ui's interpreter + rpath to /usr/lib/ruyiseek. A
+    post-patch ldd self-check fails the build if any closure entry
+    ends up unresolvable.
+  * packaging/deb/recursive_ldd.sh (the closure walker used by
+    bundle-libs.sh) resolves SONAMEs via ldconfig -p with a
+    find-fallback, parses ldd output to enqueue child SONAMEs, and
+    marks MISSING / MISSING-DEP on stderr for anything that can't be
+    located.
+  * build.sh is updated to call bundle-libs.sh after install and to
+    skip-delete the new *.sh helpers from the staging tree cleanup
+    pass (they live next to build.sh as build-time only).
+  * Verify pass on a fresh dpkg -i install:
+      ldd /usr/bin/ruyiseek-ui                (rpath honored)
+      /usr/lib/ruyiseek/ld-linux-x86-64.so.2 --library-path \
+          /usr/lib/ruyiseek /usr/bin/ruyiseek-ui --help   (rc=0)
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Sun, 09 Aug 2026 02:45:00 +0000
+
 ruyiseek (0.1.0-9) unstable; urgency=medium
 
   * Click outside the launcher to hide. The launcher window is now

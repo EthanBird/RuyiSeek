@@ -100,11 +100,19 @@ mkdir -p "$STAGING/usr/bin"
 # ship in the binary package.
 find "$STAGING" -maxdepth 1 -mindepth 1 \
     -not -name 'build.sh' \
+    -not -name 'bundle-libs.sh' \
+    -not -name 'recursive_ldd.sh' \
     -not -name 'icons' \
     \( -name '*.sh' -o -name '*.md' -o -name 'README*' -o -name 'shim.c' -o -name 'shim.o' \) -delete || true
 install -m 0755 "$STATIC_BIN_DIR/ruyiseekd"  "$STAGING/usr/bin/ruyiseekd"
 install -m 0755 "$DYN_BIN_DIR/ruyiseek-ui"    "$STAGING/usr/bin/ruyiseek-ui"
 install -m 0755 "$STATIC_BIN_DIR/ruyi"        "$STAGING/usr/bin/ruyi"
+
+# 把 ruyiseek-ui 运行所需的全部共享库（X11 客户端栈 + 字体栈 + glibc 基础栈 +
+# 动态链接器）内联到 $STAGING/usr/lib/ruyiseek/，并 patchelf 二进制让它的
+# PT_INTERP / DT_RPATH 指向那里。客户目标机无网场景下 .deb 即装即跑，
+# 不依赖 apt 拉任何 Depends。详细见 bundle-libs.sh 顶部注释。
+"$SCRIPT_DIR/bundle-libs.sh" "$STAGING"
 
 # 安装图标：hicolor 多尺寸 + 可缩放 SVG（系统托盘使用代码生成的 ARGB 位图，
 # 见 apps/ruyiseek-ui/src/tray.rs 的 make_icon()）。SVG 源文件位于

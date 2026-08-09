@@ -1,5 +1,5 @@
 Package: ruyiseek
-Version: 0.1.0-9
+Version: 0.1.0-10
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -7,7 +7,7 @@ Maintainer: RuyiSeek contributors <ruyiseek@users.noreply.github.com>
 Homepage: https://github.com/EthanBird/RuyiSeek
 Vcs-Browser: https://github.com/EthanBird/RuyiSeek
 Vcs-Git: https://github.com/EthanBird/RuyiSeek.git
-Depends: libc6, libgcc1, libx11-6, libxcb1, libxi6, libxcursor1, libx11-xcb1, libxkbcommon0, libfontconfig1
+Depends: libc6 (>= 2.28)
 Recommends: systemd
 Suggests: xdg-utils, libdbus-1-3, xclip, wl-clipboard
 Description: 如意寻 — UOS/DDE 全局文件与应用启动器
@@ -31,4 +31,10 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  因此 `ruyiseek-ui` 需要运行时存在 libc6 / libgcc1 与若干 X11 库；
  `ruyi` 与 `ruyiseekd` 不依赖这些。安装路径只需 `dpkg -i ./xxx.deb`
  或 `apt install ./xxx.deb`，无需 `apt-get -f`。
-Installed-Size: 13244
+ .
+ v0.1.0-10 起 `ruyiseek-ui` 把 glibc 基础栈、X11 客户端栈、字体栈
+ 与动态链接器全部内联进 /usr/lib/ruyiseek/，二进制 PT_INTERP /
+ DT_RPATH 已 patchelf 到该目录；离线（无 apt 仓库）机器上
+ `dpkg -i ./xxx.deb` 即可，不依赖 apt 拉任何运行时依赖（仅 Depends
+ `libc6 (>= 2.28)`，用于 ldconfig 与 dynamic loader 注册）。
+Installed-Size: 13564
