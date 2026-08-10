@@ -1,0 +1,50 @@
+name: Publish v0.1.0-12
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-v0.1.0-12.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Create source release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: v0.1.0-12
+      # This exact commit passed the Rust 1.75 formatting, full-test and
+      # strict-Clippy gates before the publishing workflow was added.
+      RELEASE_TARGET: 4eeb3b3140f96abb773ef45ef6a4d9b395587eef
+    steps:
+      - name: Publish GitHub release
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$RELEASE_TAG already exists; nothing to publish"
+            exit 0
+          fi
+
+          cat >release-notes.md <<'NOTES'
+          ## 主要修复
+
+          - 自动读取 `/proc/self/mountinfo`，索引 HOME 以及可读的本地块设备挂载点，解决统信 UOS 新增卷无法搜索的问题。
+          - 每两秒检测挂载与卸载；后台构建新索引并原子切换，重建期间旧索引仍可搜索，卸载后不再返回失效结果。
+          - 排除系统目录、伪文件系统、网络卷、loop/squashfs 和重复 bind mount，同时正确处理转义及非 UTF-8 Linux 路径。
+          - 自动索引容量按每个卷 250,000 项扩展，总上限 2,000,000；显式 `--root` 与 `--max-entries` 的行为保持可控。
+
+          ## 验证
+
+          - Rust 1.75 基线 CI 全部通过：格式检查、50 项完整工作区测试、严格 Clippy（`-D warnings`）。
+          - 覆盖 UOS mountinfo 解析、动态卷筛选、bind/嵌套挂载去重、容量策略、IPC、搜索、UI、托盘及 X11 剪贴板。
+
+          本次先发布已验证源码；预编译 UOS `.deb` 将在目标系统完成兼容性验证后另行附加。
+          NOTES
+
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_TARGET" \
+            --title "v0.1.0-12：自动发现 UOS 新增卷" \
+            --notes-file release-notes.md
