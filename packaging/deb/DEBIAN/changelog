@@ -1,3 +1,27 @@
+ruyiseek (0.1.0-13) unstable; urgency=high
+
+  * Fix the UOS runtime bundle to copy each SONAME symlink and its resolved
+    ELF file. Previous packages shipped 26 dangling links and silently fell
+    back to system libraries. Keep the target's matched loader/glibc pair and
+    bundle the non-glibc X11, font and C++ closure.
+  * Validate the package through its extracted loader with the host cache
+    disabled. Reject dangling links, escaped dependencies and UI symbols newer
+    than the UOS 20 GLIBC_2.28 baseline.
+  * Remove machine-specific /home/syc paths, musl-stage and shim.o from the
+    Cargo configuration. Clean CLI and daemon builds now use Rust's bundled
+    musl target and rust-lld without installing host dependencies.
+  * Stop rewriting Rust PIE files with UOS patchelf 0.10, which corrupts their
+    program headers. Emit a transitive origin-relative RPATH at link time.
+  * Build in a temporary package root instead of modifying packaging/deb in
+    place. Do not ship build.sh, bundle-libs.sh or recursive_ldd.sh at /.
+  * Build with dpkg-deb --root-owner-group directly, generate a SHA-256 file,
+    and add package structure, ABI, UI and daemon/CLI protocol smoke tests.
+  * Claim the daemon socket before the initial index scan and teach the UI to
+    distinguish an initializing daemon from a missing one. This prevents the
+    systemd UI/daemon startup race observed on UOS from creating two indexers.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 11:00:00 +0000
+
 ruyiseek (0.1.0-12) unstable; urgency=medium
 
   * Fix external-volume search on UOS. When started without explicit

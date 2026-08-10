@@ -8,5 +8,4 @@ Comment[en]=Start the RuyiSeek tray and double-Control activation after login
 Exec=ruyiseek-ui --background
 Icon=io.github.ethanbird.RuyiSeek
 Terminal=false
-OnlyShowIn=Deepin;XFCE;GNOME;
 X-GNOME-Autostart-enabled=true

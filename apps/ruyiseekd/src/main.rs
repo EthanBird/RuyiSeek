@@ -42,6 +42,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     };
 
+    // Claim the single-instance socket before walking any search roots.  On
+    // UOS, systemd starts the daemon and UI together; a large initial scan
+    // used to leave a several-second window in which the UI could start a
+    // second daemon.  Binding first makes every later starter fail fast.
+    let listener = bind_single_instance(&config.socket)?;
+    let _socket_guard = SocketGuard(config.socket.clone());
+
     let roots = match config.automatic_home.as_deref() {
         Some(home) => discover_roots_or_home(home),
         None => config.roots.clone(),
@@ -57,8 +64,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         initial_state.max_entries
     );
     let state = Arc::new(RwLock::new(initial_state));
-    let listener = bind_single_instance(&config.socket)?;
-    let _socket_guard = SocketGuard(config.socket.clone());
     let _mount_monitor = if config.once {
         None
     } else {

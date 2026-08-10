@@ -1,4 +1,6 @@
-use ruyiseek_ipc::{default_socket_path, request_daemon, DaemonStatus, Request, Response};
+use ruyiseek_ipc::{
+    default_socket_path, request_daemon, ClientError, DaemonStatus, Request, Response,
+};
 use ruyiseek_platform::hotkey::{
     ArrowKey, ControlKey, DoubleCtrlRecognizer, GestureContext, GestureDecision, Key, KeyEvent,
     KeyState,
@@ -729,8 +731,25 @@ fn ensure_daemon_running() {
     const POLL_INTERVAL: Duration = Duration::from_millis(150);
 
     let socket = default_socket_path();
-    if probe_daemon(&socket, PROBE_TIMEOUT) {
-        return;
+    match probe_daemon(&socket, PROBE_TIMEOUT) {
+        DaemonProbe::Ready => return,
+        DaemonProbe::Initializing => {
+            // A connected socket with no response yet means that systemd's
+            // daemon has claimed the single-instance socket and is building
+            // its initial index.  Give it time to become responsive instead
+            // of launching a competing daemon.
+            match wait_for_daemon(&socket, PROBE_TIMEOUT, SOCKET_TIMEOUT, POLL_INTERVAL) {
+                DaemonProbe::Ready => return,
+                DaemonProbe::Initializing => {
+                    eprintln!(
+                        "ruyiseek-ui: ruyiseekd 正在初始化；界面启动后将继续连接后台服务"
+                    );
+                    return;
+                }
+                DaemonProbe::Unavailable => {}
+            }
+        }
+        DaemonProbe::Unavailable => {}
     }
 
     let Some(daemon_path) = locate_daemon_binary() else {
@@ -775,12 +794,10 @@ fn ensure_daemon_running() {
         }
     }
 
-    let deadline = std::time::Instant::now() + SOCKET_TIMEOUT;
-    while std::time::Instant::now() < deadline {
-        if probe_daemon(&socket, PROBE_TIMEOUT) {
-            return;
-        }
-        thread::sleep(POLL_INTERVAL);
+    if wait_for_daemon(&socket, PROBE_TIMEOUT, SOCKET_TIMEOUT, POLL_INTERVAL)
+        == DaemonProbe::Ready
+    {
+        return;
     }
     eprintln!(
         "ruyiseek-ui: ruyiseekd 启动等待超时（{} 秒）；状态栏将显示连接失败",
@@ -788,8 +805,44 @@ fn ensure_daemon_running() {
     );
 }
 
-fn probe_daemon(socket: &Path, timeout: Duration) -> bool {
-    request_daemon(socket, &Request::Ping, timeout).is_ok()
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DaemonProbe {
+    Ready,
+    Initializing,
+    Unavailable,
+}
+
+fn probe_daemon(socket: &Path, timeout: Duration) -> DaemonProbe {
+    classify_daemon_probe(request_daemon(socket, &Request::Ping, timeout))
+}
+
+fn classify_daemon_probe(result: Result<Response, ClientError>) -> DaemonProbe {
+    match result {
+        Ok(_) => DaemonProbe::Ready,
+        // Protocol exchange failures happen after connect(2) succeeds.  The
+        // early-bound daemon is alive but may still be indexing and not yet
+        // accepting requests, so starting another instance would be wrong.
+        Err(ClientError::Protocol(_)) => DaemonProbe::Initializing,
+        Err(ClientError::Connect { .. }) => DaemonProbe::Unavailable,
+    }
+}
+
+fn wait_for_daemon(
+    socket: &Path,
+    probe_timeout: Duration,
+    total_timeout: Duration,
+    poll_interval: Duration,
+) -> DaemonProbe {
+    let deadline = std::time::Instant::now() + total_timeout;
+    let mut last = DaemonProbe::Unavailable;
+    while std::time::Instant::now() < deadline {
+        last = probe_daemon(socket, probe_timeout);
+        if last == DaemonProbe::Ready {
+            return last;
+        }
+        thread::sleep(poll_interval);
+    }
+    last
 }
 
 fn locate_daemon_binary() -> Option<PathBuf> {
@@ -1054,7 +1107,9 @@ fn print_help() {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, LaunchMode, Options};
+    use super::{classify_daemon_probe, parse_args, DaemonProbe, LaunchMode, Options};
+    use ruyiseek_ipc::{ClientError, ProtocolError};
+    use std::io;
 
     fn args(values: &[&str]) -> impl Iterator<Item = String> {
         values
@@ -1087,6 +1142,27 @@ mod tests {
     fn rejects_conflicting_control_modes() {
         let error = parse_args(args(&["--background", "--quit"])).unwrap_err();
         assert_eq!(error.to_string(), "只能指定一个启动/控制选项");
+    }
+
+    #[test]
+    fn protocol_timeout_is_not_treated_as_an_absent_daemon() {
+        assert_eq!(
+            classify_daemon_probe(Err(ClientError::Protocol(ProtocolError::Io(
+                io::Error::new(io::ErrorKind::TimedOut, "daemon is initializing"),
+            )))),
+            DaemonProbe::Initializing
+        );
+    }
+
+    #[test]
+    fn connect_failure_is_reported_as_unavailable() {
+        assert_eq!(
+            classify_daemon_probe(Err(ClientError::Connect {
+                socket: "/run/user/1000/ruyiseek/daemon.sock".into(),
+                source: io::Error::new(io::ErrorKind::NotFound, "socket is absent"),
+            })),
+            DaemonProbe::Unavailable
+        );
     }
 
     #[test]

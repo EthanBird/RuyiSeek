@@ -1,34 +1,33 @@
 #!/usr/bin/env bash
-# 把 ruyiseek-ui 运行所需的全部共享库 + 动态链接器打包到 $STAGING/usr/lib/ruyiseek/，
-# 并 patchelf 修改二进制，让它脱离系统 /lib/x86_64-linux-gnu 也能跑。
-#
-# 背景：客户的目标机不能联网，apt install 不能拉 Depends。ruyiseekd / ruyi
-# 是 musl 静态链接没有运行时依赖；只有 ruyiseek-ui 是动态链接的（winit 通过
-# dlopen 加载 libX11.so.6 等，所以 musl-static 的 dlopen 是桩函数这条路被堵
-# 死了）。本脚本把 27 个 .so + ld-linux 全部内联进 .deb，再用 patchelf 把
-# 二进制的 DT_RPATH 和 PT_INTERP 改成 /usr/lib/ruyiseek，apt 就不再需要联网
-# 装 X11 / fontconfig / freetype / 等等。
+# Bundle the UOS 20 runtime closure for ruyiseek-ui into a package staging tree.
 
 set -euo pipefail
 
 STAGING="${1:?usage: bundle-libs.sh <staging-tree>}"
-# Patch 进去的 RPATH 和 PT_INTERP 必须是安装后的路径（/usr/lib/ruyiseek），
-# 不是当前 staging 树。.deb 会被 dpkg 解到 /，二进制运行时只在 / 下找库。
 INSTALL_LIBS_DIR="/usr/lib/ruyiseek"
-LIBS_DIR="$STAGING/$INSTALL_LIBS_DIR"
+LIBS_DIR="$STAGING$INSTALL_LIBS_DIR"
 HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 DYN_BIN="$STAGING/usr/bin/ruyiseek-ui"
+
 if [ ! -x "$DYN_BIN" ]; then
-    echo "bundle-libs.sh: binary not found in staging: $DYN_BIN" >&2
+    echo "bundle-libs.sh: binary not found: $DYN_BIN" >&2
     exit 1
 fi
 
+for command_name in readelf ldd ldconfig file; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        echo "bundle-libs.sh: required existing tool is missing: $command_name" >&2
+        exit 1
+    fi
+done
+
+# A staging directory must never inherit libraries from a previous package.
+rm -rf "$LIBS_DIR"
 mkdir -p "$LIBS_DIR"
 
-# 1. 解析闭包。把 Depends: 段里声明的库 + 直接 dlopen 入口（libxkbcommon-x11、
-#    libxcb-xkb、libstdc++、libgcc_s）作为种子喂给 recursive_ldd.sh。它会顺着
-#    ldd 的输出把每个子库的 SONAME 加进队列，直到整张闭包稳定。
+# Libraries opened directly by the executable are discovered through NEEDED.
+# Slint/winit opens the X11 stack with dlopen, so those SONAMEs are explicit
+# roots even though they do not appear in readelf -d output.
 SEEDS=(
     libX11.so.6
     libxcb.so.1
@@ -43,64 +42,100 @@ SEEDS=(
     libstdc++.so.6
     libgcc_s.so.1
 )
-echo "==> 解析 ruyiseek-ui 的运行时共享库闭包"
-CLOSURE_TSV="$(mktemp)"
-trap 'rm -f "$CLOSURE_TSV"' EXIT
-LIB_SEARCH_DIR="/lib/x86_64-linux-gnu"
+
+LIB_SEARCH_DIR=/lib/x86_64-linux-gnu
 if [ ! -d "$LIB_SEARCH_DIR" ]; then
-    LIB_SEARCH_DIR="/usr/lib/x86_64-linux-gnu"
-fi
-"$HELPER_DIR/recursive_ldd.sh" "$LIB_SEARCH_DIR" "${SEEDS[@]}" > "$CLOSURE_TSV"
-COUNT=$(wc -l < "$CLOSURE_TSV")
-echo "    $COUNT 个共享库（含 glibc 基础栈、X11 客户端栈、字体栈）"
-
-# 2. 拷贝。每个 SONAME 在源目录里通常同时存在一个无版本的 .so.X 软链接和一
-#    个带完整版本号的实际文件。loader 通过 SONAME 找库，所以两边都要进
-#    LIBS_DIR。用 cp -P 保留软链接。
-echo "==> 拷贝闭包到 $LIBS_DIR"
-while IFS=$'\t' read soname path; do
-    [ -z "$soname" ] && continue
-    src_dir=$(dirname "$path")
-    cp -P "$src_dir/$soname" "$LIBS_DIR/" 2>/dev/null || true
-    cp -P "$path"             "$LIBS_DIR/"
-done < "$CLOSURE_TSV"
-
-# 3. 拷贝动态链接器本身。PT_INTERP 必须指到一个真实文件。系统的 ld-linux
-#    在 /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2，它本身是个指向
-#    ld-2.28.so 的软链接。-P 保留软链接形态，但目标文件（ld-2.28.so）不会
-#    跟着进来——必须显式再拷一次。
-LD_SRC=/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-cp -P "$LD_SRC" "$LIBS_DIR/"
-# 解析软链接拿到真实文件并拷过去，避免装到目标机后变 dangling symlink
-LD_REAL=$(readlink -f "$LD_SRC")
-if [ -n "$LD_REAL" ] && [ "$LD_REAL" != "$LD_SRC" ]; then
-    cp -P "$LD_REAL" "$LIBS_DIR/"
+    LIB_SEARCH_DIR=/usr/lib/x86_64-linux-gnu
 fi
 
-# 4. patchelf 二进制。把 PT_INTERP 与 DT_RPATH 都改到 LIBS_DIR。所有 dlopen
-#    （包括 winit → x11-dl 走的动态加载）都会先搜 DT_RPATH。
-echo "==> patchelf：PT_INTERP / DT_RPATH → $INSTALL_LIBS_DIR"
-patchelf --set-interpreter "$INSTALL_LIBS_DIR/ld-linux-x86-64.so.2" "$DYN_BIN"
-patchelf --set-rpath       "$INSTALL_LIBS_DIR"                         "$DYN_BIN"
+closure_file=$(mktemp)
+trap 'rm -f "$closure_file"' EXIT
+"$HELPER_DIR/recursive_ldd.sh" "$LIB_SEARCH_DIR" "${SEEDS[@]}" >"$closure_file"
 
-# 5. 自检：ldd 现在应该全部解析到 $LIBS_DIR 而不是 /lib/...
-echo "==> 自检：ldd ruyiseek-ui"
-MISSING=0
-while IFS= read -r line; do
-    case "$line" in
-        *"=> not found"*)
-            echo "    FAIL $line"
-            MISSING=$((MISSING + 1))
-            ;;
-        *)
-            echo "    ok   ${line%% =>*}"
+copy_soname() {
+    local soname="$1"
+    local source_path="$2"
+    local real_path real_name
+
+    real_path=$(readlink -f "$source_path")
+    if [ -z "$real_path" ] || [ ! -f "$real_path" ]; then
+        echo "bundle-libs.sh: unresolved library target: $soname -> $source_path" >&2
+        exit 1
+    fi
+    real_name=$(basename "$real_path")
+
+    # Copy the real ELF object first, then recreate the SONAME link using a
+    # relative target. cp -P alone would copy only a dangling symlink.
+    if [ ! -e "$LIBS_DIR/$real_name" ]; then
+        cp -a "$real_path" "$LIBS_DIR/$real_name"
+    fi
+    if [ "$soname" != "$real_name" ]; then
+        ln -sfn "$real_name" "$LIBS_DIR/$soname"
+    fi
+}
+
+while IFS=$'\t' read -r soname source_path; do
+    [ -n "$soname" ] || continue
+    # Keep the loader and glibc family supplied by the target's required
+    # libc6 package. Mixing a private libc with a differently patched system
+    # loader is unsupported and can assert before main().
+    case "$soname" in
+        libc.so.6|libdl.so.2|libm.so.6|libpthread.so.0|librt.so.1|ld-linux-x86-64.so.2)
+            continue
             ;;
     esac
-done < <(ldd "$DYN_BIN" 2>&1 | grep ' => ' || true)
+    copy_soname "$soname" "$source_path"
+done <"$closure_file"
 
-if [ "$MISSING" -gt 0 ]; then
-    echo "bundle-libs.sh: $MISSING 个库没解析到，.deb 不能离线用" >&2
+# The old UOS patchelf 0.10 corrupts this PIE. The binary must already carry
+# the link-time RPATH from .cargo/config.toml and retain the system loader.
+readelf -l "$DYN_BIN" | grep -Fq \
+    '[Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]'
+readelf -d "$DYN_BIN" | grep -Fq \
+    'Library rpath: [$ORIGIN/../lib/ruyiseek]'
+
+broken_links=$(find -L "$LIBS_DIR" -maxdepth 1 -type l -print)
+if [ -n "$broken_links" ]; then
+    echo "bundle-libs.sh: package contains dangling runtime links:" >&2
+    echo "$broken_links" >&2
     exit 1
 fi
 
-echo "==> 完成：$(du -sh "$LIBS_DIR" | awk '{print $1}') 的运行时库已内联"
+resolution=$(
+    /lib64/ld-linux-x86-64.so.2 --inhibit-cache --list "$DYN_BIN" 2>&1
+) || {
+    echo "bundle-libs.sh: isolated loader resolution failed:" >&2
+    echo "$resolution" >&2
+    exit 1
+}
+
+# Non-glibc dependencies must resolve inside the package. The system loader
+# and libc6 family are the only intentional host resolutions.
+libs_dir_real=$(readlink -f "$LIBS_DIR")
+while IFS=$'\t' read -r soname resolved_path; do
+    [ -n "$resolved_path" ] || continue
+    resolved_real=$(readlink -f "$resolved_path")
+    case "$resolved_real" in
+        "$libs_dir_real"/*) ;;
+        *)
+            case "$soname" in
+                libc.so.6|libdl.so.2|libm.so.6|libpthread.so.0|librt.so.1|ld-linux-x86-64.so.2)
+                    ;;
+                *)
+                    echo "bundle-libs.sh: dependency escaped package runtime: $soname -> $resolved_real" >&2
+                    echo "$resolution" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+    esac
+done < <(awk '
+    /=> \// { print $1 "\t" $3 }
+    /^[[:space:]]*\// { path=$1; name=path; sub(/^.*\//, "", name); print name "\t" path }
+' <<<"$resolution")
+
+"$DYN_BIN" --demo-double-ctrl | grep -Fq '双击 Ctrl 已识别'
+
+count=$(wc -l <"$closure_file")
+size=$(du -sh "$LIBS_DIR" | awk '{print $1}')
+echo "==> inspected $count libraries, bundled non-glibc closure ($size), isolated resolution passed"
