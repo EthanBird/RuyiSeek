@@ -18,7 +18,7 @@ pub enum Key {
     NonModifier,
 }
 
-/// Directional arrow keys reported by the XInput2 listener.
+/// Directional arrow keys reported by the `XInput2` listener.
 ///
 /// Used by the launcher UI to advance the selected result. They are reported
 /// as a *separate* signal from [`Key`] because Slint 1.6's focused `LineEdit`

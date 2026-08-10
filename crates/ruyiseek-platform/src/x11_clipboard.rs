@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ChangeWindowAttributesAux, ConnectionExt, EventMask, PropMode,
+    Atom, AtomEnum, ChangeWindowAttributesAux, ConnectionExt, CreateWindowAux, EventMask, PropMode,
     SelectionClearEvent, SelectionNotifyEvent, SelectionRequestEvent, WindowClass,
 };
 use x11rb::protocol::Event;
@@ -100,8 +100,9 @@ fn intern(connection: &RustConnection, name: &[u8]) -> Result<Atom, ClipboardErr
 /// drop 它，守护线程会立即被取消（通过 `cancel_flag` 主动释放 owner，
 /// 然后 connection drop 让 X server 收回 owner）。
 ///
-/// UI 线程不要直接调 `set_clipboard`——它会阻塞。改调
-/// [`set_clipboard_async`]：spawn 后台线程，立即返回 [`ClipboardOwner`]。
+/// # Errors
+///
+/// Returns [`ClipboardError`] when the X11 connection, selection setup or owner thread fails.
 pub fn set_clipboard(data: Vec<u8>, mime: ClipboardMime) -> Result<ClipboardOwner, ClipboardError> {
     let (connection, screen_number) =
         x11rb::connect(None).map_err(|error| ClipboardError(format!("X11 连接失败：{error}")))?;
@@ -123,7 +124,7 @@ pub fn set_clipboard(data: Vec<u8>, mime: ClipboardMime) -> Result<ClipboardOwne
             0,
             WindowClass::INPUT_OUTPUT,
             x11rb::COPY_FROM_PARENT,
-            &Default::default(),
+            &CreateWindowAux::default(),
         )
         .map_err(|error| ClipboardError(format!("create_window：{error}")))?;
 
@@ -166,12 +167,16 @@ pub fn set_clipboard(data: Vec<u8>, mime: ClipboardMime) -> Result<ClipboardOwne
 }
 
 /// 后台线程友好的便利函数：spawn 一个线程跑 [`set_clipboard`] 并丢弃
-/// owner handle（因为 set_clipboard 返回的 owner 已经把 connection 和
+/// owner handle（因为 `set_clipboard` 返回的 owner 已经把 connection 和
 /// 守护线程打包好一起管了，drop 时会自动取消）。
 ///
 /// 如果已经有更早的 owner 在跑（用户连续点击复制菜单），新 owner 会通过
 /// `set_selection_owner` 抢走 CLIPBOARD，老 owner 收到 `SelectionClear`
 /// 后退出——自然衔接，不需要外部协调。
+///
+/// # Errors
+///
+/// Returns [`ClipboardError`] when the clipboard owner cannot be created.
 pub fn set_clipboard_async(data: Vec<u8>, mime: ClipboardMime) -> Result<(), ClipboardError> {
     let _owner = set_clipboard(data, mime)?;
     // 注意：这里 drop owner。如果 set_clipboard 是从 UI 线程同步调用的，
@@ -212,7 +217,7 @@ impl Drop for ClipboardOwner {
 /// - 达到 `HARD_OWNER_TIMEOUT`（5 分钟）硬上限，避免 setter 进程僵死
 ///   后 CLIPBOARD 永远被一个死 window 占着。
 ///
-/// 注意：调用方在 `serve_selection_events` 返回后保持 RustConnection
+/// 注意：调用方在 `serve_selection_events` 返回后保持 `RustConnection`
 /// 不 drop（即局部变量还在作用域内），X server 才不会把我们的 owner
 /// 当 dead 窗口回收。`set_clipboard` 一直 hold 整个函数直到
 /// `serve_selection_events` 返回，所以这里实现没问题。
@@ -223,8 +228,9 @@ fn serve_selection_events(
     mime: ClipboardMime,
     cancel: &AtomicBool,
 ) -> Result<(), ClipboardError> {
-    let deadline = Instant::now() + HARD_OWNER_TIMEOUT;
-    let mut last_served = Instant::now() - Duration::from_secs(1);
+    let now = Instant::now();
+    let deadline = now + HARD_OWNER_TIMEOUT;
+    let mut last_served = now.checked_sub(Duration::from_secs(1)).unwrap_or(now);
     let mut served_any = false;
     while Instant::now() < deadline {
         if cancel.load(Ordering::Acquire) {
@@ -292,7 +298,7 @@ fn handle_request(
             target_property,
             Atom::from(AtomEnum::ATOM),
             32,
-            offered.len() as u32,
+            3,
             &bytes,
         );
         send_notify(connection, request, target_property);
@@ -303,13 +309,17 @@ fn handle_request(
         || request.target == atoms.text
         || request.target == atoms.text_uri_list
     {
+        let Ok(data_len) = u32::try_from(data.len()) else {
+            send_notify(connection, request, x11rb::NONE);
+            return;
+        };
         let _ = connection.change_property(
             PropMode::REPLACE,
             request.requestor,
             target_property,
             Atom::from(request.target),
             8,
-            data.len() as u32,
+            data_len,
             data,
         );
         send_notify(connection, request, target_property);

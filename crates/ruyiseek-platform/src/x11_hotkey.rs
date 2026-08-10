@@ -153,6 +153,7 @@ where
         .map_err(|error| HotkeyError(format!("启动 X11 热键线程失败：{error}")))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_event_loop<TriggerCallback, ArrowCallback>(
     connection: &RustConnection,
     root: Window,
@@ -259,7 +260,7 @@ impl KeyMap {
         }
         let chunks: Vec<&[u32]> = reply.keysyms.chunks(per_keycode).collect();
         let entries = chunks.iter().map(|ks| classify_keysyms(ks)).collect();
-        let keysyms = chunks.into_iter().map(|ks| ks.to_vec()).collect();
+        let keysyms = chunks.into_iter().map(<[u32]>::to_vec).collect();
         Ok(Self {
             first_keycode,
             entries,

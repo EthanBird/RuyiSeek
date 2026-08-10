@@ -24,6 +24,8 @@ ruyiseek (0.1.0-12) unstable; urgency=medium
   * Repair the X11 clipboard integration test: call the real in-process owner
     instead of a nonexistent helper binary, remove invalid placeholder polling,
     and compile the test only when the x11 feature is enabled.
+  * Resolve strict Clippy findings in the X11 platform layer, including checked
+    property lengths, checked Instant subtraction and public API documentation.
 
  -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 03:30:00 +0000
 
