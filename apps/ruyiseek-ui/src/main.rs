@@ -243,7 +243,7 @@ fn install_ui_callbacks(
 
     let weak_launcher = launcher.as_weak();
     let copy_paths = Rc::clone(result_paths);
-    let copy_clipboard = Rc::clone(&clipboard_owner);
+    let copy_clipboard = Rc::clone(clipboard_owner);
     launcher.on_copy_file(move |index| {
         let Some(launcher) = weak_launcher.upgrade() else {
             return;
@@ -262,7 +262,7 @@ fn install_ui_callbacks(
 
     let weak_launcher = launcher.as_weak();
     let copy_path_paths = Rc::clone(result_paths);
-    let copy_path_clipboard = Rc::clone(&clipboard_owner);
+    let copy_path_clipboard = Rc::clone(clipboard_owner);
     launcher.on_copy_path(move |index| {
         let Some(launcher) = weak_launcher.upgrade() else {
             return;
@@ -300,7 +300,7 @@ fn install_settings_callbacks(
     visible: &Rc<Cell<bool>>,
 ) {
     let weak_launcher = launcher.as_weak();
-    let visible_for_close = Rc::clone(&visible);
+    let visible_for_close = Rc::clone(visible);
     launcher.on_close_settings(move || {
         let Some(launcher) = weak_launcher.upgrade() else {
             return;
@@ -466,7 +466,7 @@ fn apply_search_results(
 
 /// Move the highlighted result by one row in response to an arrow keypress.
 ///
-/// Driven by the XInput2 raw stream because Slint 1.6's focused `LineEdit`
+/// Driven by the `XInput2` raw stream because Slint 1.6's focused `LineEdit`
 /// consumes arrow events for its own cursor before any user-defined
 /// `key-pressed` callback on a parent `FocusScope` can see them. Only Up and
 /// Down are used; Left and Right are reserved for future column-style
