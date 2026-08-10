@@ -2,29 +2,30 @@
 //! 通过另一个 X11 连接读回（不走 xclip，验证我们自己实现的协议）。
 //!
 //! 用法：
-//!   xvfb-run -a cargo run --example clipboard_round_trip --features x11 -- <utf-8 文本>
+//!   xvfb-run -a cargo run --example `clipboard_round_trip` --features x11 -- <utf-8 文本>
 //!
 //! 在测试 X server 上：
 //! 1. 开 X 连接 A，写 CLIPBOARD；
-//! 2. 开 X 连接 B，ConvertSelection → 读 SelectionNotify → 读 property；
+//! 2. 开 X 连接 B，`ConvertSelection` → 读 `SelectionNotify` → 读 property；
 //! 3. 比较数据。
 //!
-//! 这能确认三个事：(a) set_clipboard 不会 panic；(b) 协议正确
-//! （TARGETS / UTF8_STRING 都按规范返回）；(c) 数据未在传输中损坏。
+//! 这能确认三个事：(a) `set_clipboard` 不会 panic；(b) 协议正确
+//! （TARGETS / `UTF8_STRING` 都按规范返回）；(c) 数据未在传输中损坏。
 
 use std::env;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{
-    AtomEnum, ConnectionExt, ConvertSelectionRequest, EventMask, PropMode, SelectionNotifyEvent,
-};
+use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, CreateWindowAux};
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 
 use ruyiseek_platform::x11_clipboard::{set_clipboard, ClipboardMime};
 
+// Keeping the complete owner/requestor exchange in one function makes this executable example
+// easier to follow from top to bottom than splitting the protocol sequence across helpers.
+#[allow(clippy::too_many_lines)]
 fn main() -> ExitCode {
     let payload = env::args()
         .nth(1)
@@ -72,7 +73,7 @@ fn main() -> ExitCode {
         0,
         x11rb::protocol::xproto::WindowClass::INPUT_OUTPUT,
         x11rb::COPY_FROM_PARENT,
-        &Default::default(),
+        &CreateWindowAux::default(),
     ) {
         eprintln!("create_window: {e}");
         return ExitCode::FAILURE;
@@ -135,12 +136,9 @@ fn main() -> ExitCode {
             }
         }
     }
-    let notify = match got_notify {
-        Some(n) => n,
-        None => {
-            eprintln!("未收到 SelectionNotify");
-            return ExitCode::FAILURE;
-        }
+    let Some(notify) = got_notify else {
+        eprintln!("未收到 SelectionNotify");
+        return ExitCode::FAILURE;
     };
     println!("got SelectionNotify: property={:?}", notify.property);
     if notify.property == x11rb::NONE {
@@ -184,22 +182,4 @@ fn intern_atom(conn: &RustConnection, name: &[u8]) -> Result<u32, String> {
         .reply()
         .map(|r| r.atom)
         .map_err(|e| format!("{e}"))
-}
-
-// 抑制未使用
-#[allow(dead_code)]
-fn _unused() -> Option<ConvertSelectionRequest> {
-    None
-}
-#[allow(dead_code)]
-fn _unused2() -> Option<SelectionNotifyEvent> {
-    None
-}
-#[allow(dead_code)]
-fn _unused3() -> Option<PropMode> {
-    None
-}
-#[allow(dead_code)]
-fn _unused4() -> Option<EventMask> {
-    None
 }

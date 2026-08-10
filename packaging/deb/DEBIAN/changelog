@@ -28,6 +28,8 @@ ruyiseek (0.1.0-12) unstable; urgency=medium
     property lengths, checked Instant subtraction and public API documentation.
   * Remove redundant character-test closures in the query scorer for the
     workspace-wide strict Clippy gate.
+  * Clean the standalone clipboard round-trip example for strict Clippy while
+    retaining its linear, protocol-demonstration structure.
 
  -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 03:30:00 +0000
 
