@@ -124,7 +124,7 @@ fn score(item: &SearchItem, tokens: &[&str], raw_query_uppercase: bool) -> Optio
     if raw_query_uppercase && tokens.iter().map(|t| t.chars().count()).sum::<usize>() >= 2 {
         let initials = path_segments
             .iter()
-            .filter_map(|seg| seg.chars().find(|c| c.is_ascii_alphanumeric()))
+            .filter_map(|seg| seg.chars().find(char::is_ascii_alphanumeric))
             .collect::<String>();
         let query_initials: String = tokens.iter().copied().collect();
         if !initials.is_empty() && initials.contains(&query_initials) {
@@ -133,7 +133,7 @@ fn score(item: &SearchItem, tokens: &[&str], raw_query_uppercase: bool) -> Optio
         // 也对 name 做一次：name 里按 `_-/ ` 切词再取首字母
         let name_initials: String = name
             .split(|c: char| c == '_' || c == '-' || c == ' ' || c == '/')
-            .filter_map(|seg| seg.chars().find(|c| c.is_ascii_alphanumeric()))
+            .filter_map(|seg| seg.chars().find(char::is_ascii_alphanumeric))
             .collect::<String>();
         if !name_initials.is_empty() && name_initials.contains(&query_initials) {
             value += 0.10;
@@ -164,11 +164,11 @@ fn score(item: &SearchItem, tokens: &[&str], raw_query_uppercase: bool) -> Optio
         let query_initials = tokens[0];
         let path_initials: String = path_segments
             .iter()
-            .filter_map(|seg| seg.chars().find(|c| c.is_ascii_alphanumeric()))
+            .filter_map(|seg| seg.chars().find(char::is_ascii_alphanumeric))
             .collect();
         let name_initials: String = name
             .split(|c: char| c == '_' || c == '-' || c == ' ' || c == '/')
-            .filter_map(|seg| seg.chars().find(|c| c.is_ascii_alphanumeric()))
+            .filter_map(|seg| seg.chars().find(char::is_ascii_alphanumeric))
             .collect();
         if (!path_initials.is_empty() && path_initials.contains(query_initials))
             || (!name_initials.is_empty() && name_initials.contains(query_initials))
