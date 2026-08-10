@@ -109,7 +109,11 @@ fn run_clipboard_setter(payload: &str, mime: &str) {
     }
     let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline {
-        if let Ok(Some(_)) = child.stdout.as_mut().and_then(|_| None::<UnixStream>.map(|_| Ok(0)).transpose()) {
+        if let Ok(Some(_)) = child
+            .stdout
+            .as_mut()
+            .and_then(|_| None::<UnixStream>.map(|_| Ok(0)).transpose())
+        {
             break;
         }
         match child.try_wait() {

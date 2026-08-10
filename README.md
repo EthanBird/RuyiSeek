@@ -25,11 +25,12 @@
 - `--background` 常驻模式，以及 systemd 用户服务、D-Bus 激活和 Deepin XDG Autostart 配置；
 - 单文件 `.deb` 安装包（`dist/ruyiseek_<版本>_amd64.deb`），混合 musl/gnu 构建，`apt install ./xxx.deb` 即可；
 - UI 自动 fork daemon：未检测到运行中的 `ruyiseekd` 时自行拉起，关 UI 不带走 daemon；
+- 本地卷自动发现（v0.1.0-12）：daemon 无 `--root` 启动时读取 Linux mountinfo，除 `$HOME` 外自动索引新加本地卷；运行期间插入或卸载卷会在 2 秒内触发后台重建，完成后原子切换，重建时旧索引仍可查询；
 - 方向键导航（v0.1.0-6）：在 XInput2 raw stream 上拦截 ↑↓←→ 并回灌 `selected-index`，解决 Slint 1.6 把方向键交给 LineEdit 内部 TextInput、导致父级 key-pressed 看不到的问题。
 - 右键上下文菜单（v0.1.0-8）：每个结果行右键弹出「打开 / 打开所在文件夹 / 复制文件 / 复制路径」四项；Slint 1.6 不暴露 `PopupMenu` / `MenuItem` / `MouseArea`，菜单用手写 Rectangle + TouchArea 实现，位置由 `popup-index` 驱动。复制通过 `xclip` / `wl-copy` 完成，按 `XDG_SESSION_TYPE` 选择主用工具。
 - UI 体验改进（v0.1.0-9）：启动器改为 960×600 透明无边框窗，焦点卡居中显示；点击空白处直接隐藏，点卡片 padding 不消失（只把焦点放回搜索框）；Esc 直接隐藏（不再"先清空再隐藏"两段式）；第二次双击 Ctrl 不再保留上一次结果（显式清空 results、selected-index、query 和 generation）；新 SVG 图标（青蓝渐变放大镜），同时生成 48/64/128/256 PNG，hicolor 主题自动识别；任务栏托盘位图与 SVG 配色一致，去掉旧版的白环；搜索条去掉"寻"图标和"Ctrl ×2"提示芯片，回归纯文本输入栏。
 
-持久化增量索引仍在后续迭代中。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口、搜索、单实例与托盘可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
+文件级持久化增量索引仍在后续迭代中；当前版本已经能跟随本地卷的挂载与卸载重建内存索引。Wayland 下不会绕过桌面安全模型伪造全局修饰键监听：窗口、搜索、单实例与托盘可用，双击 Ctrl 将等待 Portal 或 DDE 提供合规能力。
 
 ## 构建
 
@@ -45,9 +46,9 @@ cargo test --workspace
 单文件 `.deb` 已自带所有运行时库依赖（`libc6`、`libgcc1`、`libx11-6` 等标准 GUI 栈），在统信 UOS 20 / Deepin / Debian 10+ 主机上直接装：
 
 ```bash
-sudo apt install ./dist/ruyiseek_0.1.0-9_amd64.deb
+sudo apt install ./dist/ruyiseek_0.1.0-12_amd64.deb
 # 或
-sudo dpkg -i dist/ruyiseek_0.1.0-9_amd64.deb
+sudo dpkg -i dist/ruyiseek_0.1.0-12_amd64.deb
 ```
 
 无需 `apt-get -f install`，也无需先编译。装完后登录桌面，托盘自动出现；双击 Ctrl 唤起启动器，回车打开搜索项。如需重新构建产物：
@@ -65,6 +66,8 @@ bash packaging/deb/build.sh
 ```bash
 cargo run -p ruyiseekd -- --root "$PWD"
 ```
+
+正式运行时不传 `--root`：daemon 会索引 `$HOME` 和当前可读的本地数据卷，并持续检测卷的挂载/卸载。显式传入一个或多个 `--root` 会关闭自动卷发现，便于开发测试或限定范围。
 
 另一个终端执行搜索：
 

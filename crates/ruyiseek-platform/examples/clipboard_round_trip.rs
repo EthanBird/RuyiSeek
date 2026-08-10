@@ -18,8 +18,7 @@ use std::time::Duration;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
-    AtomEnum, ConnectionExt, ConvertSelectionRequest, EventMask,
-    PropMode, SelectionNotifyEvent,
+    AtomEnum, ConnectionExt, ConvertSelectionRequest, EventMask, PropMode, SelectionNotifyEvent,
 };
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
@@ -27,7 +26,9 @@ use x11rb::rust_connection::RustConnection;
 use ruyiseek_platform::x11_clipboard::{set_clipboard, ClipboardMime};
 
 fn main() -> ExitCode {
-    let payload = env::args().nth(1).unwrap_or_else(|| "hello clipboard".to_owned());
+    let payload = env::args()
+        .nth(1)
+        .unwrap_or_else(|| "hello clipboard".to_owned());
     let mime = if env::args().any(|a| a == "--uri") {
         ClipboardMime::UriList
     } else {
@@ -55,12 +56,23 @@ fn main() -> ExitCode {
     let root = conn.setup().roots[screen_num].root;
     let window = match conn.generate_id() {
         Ok(w) => w,
-        Err(e) => { eprintln!("generate_id: {e}"); return ExitCode::FAILURE; }
+        Err(e) => {
+            eprintln!("generate_id: {e}");
+            return ExitCode::FAILURE;
+        }
     };
     if let Err(e) = conn.create_window(
-        0, window, root, -10, -10, 1, 1, 0,
+        0,
+        window,
+        root,
+        -10,
+        -10,
+        1,
+        1,
+        0,
         x11rb::protocol::xproto::WindowClass::INPUT_OUTPUT,
-        x11rb::COPY_FROM_PARENT, &Default::default(),
+        x11rb::COPY_FROM_PARENT,
+        &Default::default(),
     ) {
         eprintln!("create_window: {e}");
         return ExitCode::FAILURE;
@@ -68,7 +80,10 @@ fn main() -> ExitCode {
 
     let clipboard_atom = match intern_atom(&conn, b"CLIPBOARD") {
         Ok(a) => a,
-        Err(e) => { eprintln!("intern CLIPBOARD: {e}"); return ExitCode::FAILURE; }
+        Err(e) => {
+            eprintln!("intern CLIPBOARD: {e}");
+            return ExitCode::FAILURE;
+        }
     };
     let target_atom = match mime {
         ClipboardMime::Text => intern_atom(&conn, b"UTF8_STRING"),
@@ -76,15 +91,25 @@ fn main() -> ExitCode {
     };
     let target = match target_atom {
         Ok(a) => a,
-        Err(e) => { eprintln!("intern target: {e}"); return ExitCode::FAILURE; }
+        Err(e) => {
+            eprintln!("intern target: {e}");
+            return ExitCode::FAILURE;
+        }
     };
     let property = match intern_atom(&conn, b"XSEL_DATA") {
         Ok(a) => a,
-        Err(e) => { eprintln!("intern XSEL_DATA: {e}"); return ExitCode::FAILURE; }
+        Err(e) => {
+            eprintln!("intern XSEL_DATA: {e}");
+            return ExitCode::FAILURE;
+        }
     };
 
     if let Err(e) = conn.convert_selection(
-        window, clipboard_atom, target, property, x11rb::CURRENT_TIME,
+        window,
+        clipboard_atom,
+        target,
+        property,
+        x11rb::CURRENT_TIME,
     ) {
         eprintln!("convert_selection: {e}");
         return ExitCode::FAILURE;
@@ -99,14 +124,23 @@ fn main() -> ExitCode {
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
         match conn.wait_for_event() {
-            Ok(Event::SelectionNotify(n)) => { got_notify = Some(n); break; }
+            Ok(Event::SelectionNotify(n)) => {
+                got_notify = Some(n);
+                break;
+            }
             Ok(_) => continue,
-            Err(e) => { eprintln!("wait_for_event: {e}"); return ExitCode::FAILURE; }
+            Err(e) => {
+                eprintln!("wait_for_event: {e}");
+                return ExitCode::FAILURE;
+            }
         }
     }
     let notify = match got_notify {
         Some(n) => n,
-        None => { eprintln!("未收到 SelectionNotify"); return ExitCode::FAILURE; }
+        None => {
+            eprintln!("未收到 SelectionNotify");
+            return ExitCode::FAILURE;
+        }
     };
     println!("got SelectionNotify: property={:?}", notify.property);
     if notify.property == x11rb::NONE {
@@ -115,15 +149,19 @@ fn main() -> ExitCode {
     }
 
     // 读 property
-    let reply = match conn.get_property(
-        false, window, notify.property, AtomEnum::ANY, 0, 4096,
-    ) {
+    let reply = match conn.get_property(false, window, notify.property, AtomEnum::ANY, 0, 4096) {
         Ok(c) => c.reply(),
-        Err(e) => { eprintln!("get_property cookie: {e}"); return ExitCode::FAILURE; }
+        Err(e) => {
+            eprintln!("get_property cookie: {e}");
+            return ExitCode::FAILURE;
+        }
     };
     let reply = match reply {
         Ok(r) => r,
-        Err(e) => { eprintln!("get_property reply: {e}"); return ExitCode::FAILURE; }
+        Err(e) => {
+            eprintln!("get_property reply: {e}");
+            return ExitCode::FAILURE;
+        }
     };
     let data = reply.value;
     let got = match std::str::from_utf8(&data) {
@@ -150,10 +188,18 @@ fn intern_atom(conn: &RustConnection, name: &[u8]) -> Result<u32, String> {
 
 // 抑制未使用
 #[allow(dead_code)]
-fn _unused() -> Option<ConvertSelectionRequest> { None }
+fn _unused() -> Option<ConvertSelectionRequest> {
+    None
+}
 #[allow(dead_code)]
-fn _unused2() -> Option<SelectionNotifyEvent> { None }
+fn _unused2() -> Option<SelectionNotifyEvent> {
+    None
+}
 #[allow(dead_code)]
-fn _unused3() -> Option<PropMode> { None }
+fn _unused3() -> Option<PropMode> {
+    None
+}
 #[allow(dead_code)]
-fn _unused4() -> Option<EventMask> { None }
+fn _unused4() -> Option<EventMask> {
+    None
+}

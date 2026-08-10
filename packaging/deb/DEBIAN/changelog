@@ -1,3 +1,25 @@
+ruyiseek (0.1.0-12) unstable; urgency=medium
+
+  * Fix external-volume search on UOS. When started without explicit
+    --root arguments, ruyiseekd now reads /proc/self/mountinfo and indexes
+    HOME plus readable local block-device mounts. OS trees, pseudo and
+    network filesystems, loop/squashfs mounts and duplicate bind mounts are
+    excluded; escaped and non-UTF-8 mount paths are decoded as Linux path
+    bytes.
+  * Detect mount and unmount changes every two seconds. A replacement index
+    is built in the background while the previous index remains searchable,
+    then swapped atomically. Nested mounts under HOME are treated as scan
+    boundaries so their contents are not duplicated.
+  * Scale the automatic item budget to 250,000 entries per discovered root,
+    capped at 2,000,000. Explicit --max-entries remains a global override and
+    explicit --root keeps its deterministic opt-out semantics.
+  * Add focused tests for UOS mountinfo parsing, filtering, path escapes,
+    bind/overlapping-root deduplication, automatic budgets and CLI behavior.
+  * Normalize the v0.1.0-11 Rust sources with the repository's Rust 1.75
+    rustfmt baseline so GitHub CI proceeds past its formatting gate.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 03:30:00 +0000
+
 ruyiseek (0.1.0-11) unstable; urgency=medium
 
   * Native X11 CLIPBOARD. "复制文件 / 复制路径" right-click menu no

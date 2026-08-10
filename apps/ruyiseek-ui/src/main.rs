@@ -3,15 +3,17 @@ use ruyiseek_platform::hotkey::{
     ArrowKey, ControlKey, DoubleCtrlRecognizer, GestureContext, GestureDecision, Key, KeyEvent,
     KeyState,
 };
+use ruyiseek_platform::x11_clipboard::{
+    set_clipboard as native_set_clipboard, ClipboardMime, ClipboardOwner,
+};
 use ruyiseek_platform::x11_hotkey::DoubleCtrlControl;
-use ruyiseek_platform::x11_clipboard::{set_clipboard as native_set_clipboard, ClipboardMime, ClipboardOwner};
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use std::cell::{Cell, RefCell};
 use std::error::Error;
 use std::io;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::os::unix::process::CommandExt;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -232,9 +234,7 @@ fn install_ui_callbacks(
                     reveal_visible.set(false);
                 }
             }
-            Err(error) => {
-                launcher.set_status_text(format!("无法打开所在文件夹：{error}").into())
-            }
+            Err(error) => launcher.set_status_text(format!("无法打开所在文件夹：{error}").into()),
         }
     });
 
@@ -764,7 +764,8 @@ fn ensure_daemon_running() {
             .spawn()
     };
     match spawn_result {
-        Ok(_child) => { /* intentionally drop the Child handle so the daemon outlives the UI; the OS reparents it to PID 1 when this UI exits. */ }
+        Ok(_child) => { /* intentionally drop the Child handle so the daemon outlives the UI; the OS reparents it to PID 1 when this UI exits. */
+        }
         Err(error) => {
             eprintln!("ruyiseek-ui: 无法启动 ruyiseekd：{error}");
             return;
@@ -1099,9 +1100,6 @@ mod tests {
         // 已经是根的文件名：空 parent 落回 /
         assert_eq!(reveal_parent(Path::new("foo.txt")), Path::new("/"));
         // 叶子目录：父目录
-        assert_eq!(
-            reveal_parent(Path::new("/var/log")),
-            Path::new("/var")
-        );
+        assert_eq!(reveal_parent(Path::new("/var/log")), Path::new("/var"));
     }
 }

@@ -4,6 +4,10 @@
 //! not follow symlinks and never requires elevated privileges. Persistent snapshots and
 //! inotify journals belong to the native index milestone.
 
+mod mounts;
+
+pub use mounts::discover_default_roots;
+
 use ruyiseek_core::{ItemKind, SearchItem};
 use std::collections::VecDeque;
 use std::fs;
@@ -38,9 +42,10 @@ pub struct ScanReport {
 #[must_use]
 pub fn scan(options: &ScanOptions) -> ScanReport {
     let mut report = ScanReport::default();
-    let mut pending: VecDeque<PathBuf> = options.roots.iter().cloned().collect();
+    let mut pending: VecDeque<(usize, PathBuf)> =
+        options.roots.iter().cloned().enumerate().collect();
 
-    while let Some(directory) = pending.pop_front() {
+    while let Some((origin_root, directory)) = pending.pop_front() {
         let Ok(entries) = fs::read_dir(&directory) else {
             report.skipped_paths += 1;
             continue;
@@ -86,7 +91,14 @@ pub fn scan(options: &ScanOptions) -> ScanReport {
             });
 
             if kind == ItemKind::Directory {
-                pending.push_back(path);
+                let is_another_root = options
+                    .roots
+                    .iter()
+                    .enumerate()
+                    .any(|(index, root)| index != origin_root && root == &path);
+                if !is_another_root {
+                    pending.push_back((origin_root, path));
+                }
             }
         }
     }
@@ -176,6 +188,30 @@ mod tests {
 
         assert_eq!(report.items.len(), 1);
         assert!(report.truncated);
+        fs::remove_dir_all(&root).expect("remove fixture directory");
+    }
+
+    #[test]
+    fn overlapping_roots_do_not_duplicate_nested_volume_contents() {
+        let root = test_root();
+        let nested = root.join("mounted-volume");
+        fs::create_dir_all(&nested).expect("create nested root");
+        fs::write(nested.join("external.txt"), b"fixture").expect("create nested fixture");
+
+        let report = scan(&ScanOptions {
+            roots: vec![root.clone(), nested],
+            include_hidden: true,
+            max_entries: 100,
+        });
+        assert_eq!(
+            report
+                .items
+                .iter()
+                .filter(|item| item.name == "external.txt")
+                .count(),
+            1
+        );
+
         fs::remove_dir_all(&root).expect("remove fixture directory");
     }
 }

@@ -121,8 +121,7 @@ fn score(item: &SearchItem, tokens: &[&str], raw_query_uppercase: bool) -> Optio
     // acronym 匹配：原 query 全是大写字母（无小写字母），且至少 2 个
     // 字母，那么把 query 当成"首字母拼接"重试一次；命中给个小加成。
     // 这里一定要放在主流程之后，因为 name 子串命中更重要。
-    if raw_query_uppercase && tokens.iter().map(|t| t.chars().count()).sum::<usize>() >= 2
-    {
+    if raw_query_uppercase && tokens.iter().map(|t| t.chars().count()).sum::<usize>() >= 2 {
         let initials = path_segments
             .iter()
             .filter_map(|seg| seg.chars().find(|c| c.is_ascii_alphanumeric()))
@@ -370,7 +369,12 @@ mod tests {
         // 而 "rep" 在 "/report-something-entirely-different" 里只是子串。
         let engine = SearchEngine::new(vec![
             item(1, "x.txt", "/long/path/reports/x.txt", ItemKind::File),
-            item(2, "y.txt", "/report-something-entirely-different/y.txt", ItemKind::File),
+            item(
+                2,
+                "y.txt",
+                "/report-something-entirely-different/y.txt",
+                ItemKind::File,
+            ),
         ]);
 
         let hits = engine.search("rep", 10);

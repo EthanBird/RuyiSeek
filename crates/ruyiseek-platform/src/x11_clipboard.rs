@@ -72,12 +72,12 @@ struct Atoms {
 impl Atoms {
     fn load(connection: &RustConnection) -> Result<Self, ClipboardError> {
         Ok(Self {
-            clipboard:     intern(connection, b"CLIPBOARD")?,
-            targets:       intern(connection, b"TARGETS")?,
-            utf8_string:   intern(connection, b"UTF8_STRING")?,
-            text:          intern(connection, b"TEXT")?,
+            clipboard: intern(connection, b"CLIPBOARD")?,
+            targets: intern(connection, b"TARGETS")?,
+            utf8_string: intern(connection, b"UTF8_STRING")?,
+            text: intern(connection, b"TEXT")?,
             text_uri_list: intern(connection, b"text/uri-list")?,
-            multiple:      intern(connection, b"MULTIPLE")?,
+            multiple: intern(connection, b"MULTIPLE")?,
         })
     }
 }
@@ -102,12 +102,9 @@ fn intern(connection: &RustConnection, name: &[u8]) -> Result<Atom, ClipboardErr
 ///
 /// UI 线程不要直接调 `set_clipboard`——它会阻塞。改调
 /// [`set_clipboard_async`]：spawn 后台线程，立即返回 [`ClipboardOwner`]。
-pub fn set_clipboard(
-    data: Vec<u8>,
-    mime: ClipboardMime,
-) -> Result<ClipboardOwner, ClipboardError> {
-    let (connection, screen_number) = x11rb::connect(None)
-        .map_err(|error| ClipboardError(format!("X11 连接失败：{error}")))?;
+pub fn set_clipboard(data: Vec<u8>, mime: ClipboardMime) -> Result<ClipboardOwner, ClipboardError> {
+    let (connection, screen_number) =
+        x11rb::connect(None).map_err(|error| ClipboardError(format!("X11 连接失败：{error}")))?;
     let root = connection.setup().roots[screen_number].root;
     let atoms = Atoms::load(&connection)?;
 
@@ -116,7 +113,7 @@ pub fn set_clipboard(
         .map_err(|error| ClipboardError(format!("generate_id：{error}")))?;
     connection
         .create_window(
-            0,                  // depth = CopyFromParent
+            0, // depth = CopyFromParent
             window,
             root,
             -1,
@@ -198,7 +195,8 @@ pub struct ClipboardOwner {
 
 impl Drop for ClipboardOwner {
     fn drop(&mut self) {
-        self.cancel.store(true, std::sync::atomic::Ordering::Release);
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Release);
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }
@@ -281,16 +279,8 @@ fn handle_request(
 
     if request.target == atoms.targets {
         let offered: &[Atom] = match mime {
-            ClipboardMime::Text => &[
-                atoms.utf8_string,
-                atoms.text,
-                atoms.text_uri_list,
-            ],
-            ClipboardMime::UriList => &[
-                atoms.text_uri_list,
-                atoms.utf8_string,
-                atoms.text,
-            ],
+            ClipboardMime::Text => &[atoms.utf8_string, atoms.text, atoms.text_uri_list],
+            ClipboardMime::UriList => &[atoms.text_uri_list, atoms.utf8_string, atoms.text],
         };
         let mut bytes = Vec::with_capacity(offered.len() * 4);
         for atom in offered {
@@ -334,11 +324,7 @@ fn handle_request(
     send_notify(connection, request, x11rb::NONE);
 }
 
-fn send_notify(
-    connection: &RustConnection,
-    request: &SelectionRequestEvent,
-    property: Atom,
-) {
+fn send_notify(connection: &RustConnection, request: &SelectionRequestEvent, property: Atom) {
     let event = SelectionNotifyEvent {
         response_type: x11rb::protocol::xproto::SELECTION_NOTIFY_EVENT,
         sequence: 0,
@@ -348,12 +334,7 @@ fn send_notify(
         target: request.target,
         property,
     };
-    let _ = connection.send_event(
-        false,
-        request.requestor,
-        EventMask::NO_EVENT,
-        event,
-    );
+    let _ = connection.send_event(false, request.requestor, EventMask::NO_EVENT, event);
     let _ = connection.flush();
 }
 

@@ -1,5 +1,5 @@
 Package: ruyiseek
-Version: 0.1.0-11
+Version: 0.1.0-12
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -21,7 +21,7 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
   * ruyiseek-ui：Slint 启动器，支持 D-Bus 单实例、托盘与双击 Ctrl；
   * systemd --user 单元、D-Bus 激活服务与 XDG 自动启动条目。
  .
- 索引范围、收藏、拼音匹配、原生索引快照等能力将在后续版本中提供。
+ 手工索引范围、收藏、拼音匹配、原生索引快照等能力将在后续版本中提供。
  .
  本包采用混合构建：
   * `ruyi`、`ruyiseekd` 完全静态链接（musl libc），零系统 C 库依赖；
@@ -43,4 +43,9 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  列表最多露 10 行 + Flickable 滚动，搜索结果上限从 9 提到 50；
  查询引擎支持多关键词 AND、首字母 acronym 命中、按 / 切段的路径
  段位加权。
+ .
+ v0.1.0-12 起 `ruyiseekd` 会从 Linux mountinfo 自动发现 `$HOME` 之外
+ 的可读本地数据卷，并在运行期间检测挂载/卸载后后台重建、原子切换
+ 内存索引；系统树、loop、网络文件系统与重复 bind mount 默认排除。
+ 自动索引容量按每个根 25 万条扩展，总上限 200 万条。
 Installed-Size: 13660

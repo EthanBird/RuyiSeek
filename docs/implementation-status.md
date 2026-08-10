@@ -1,6 +1,6 @@
 # 实现状态
 
-更新时间：2026-08-08
+更新时间：2026-08-10
 
 ## 已完成：阶段 A0——可运行的进程与协议骨架
 
@@ -87,7 +87,16 @@
 - **设置面板居中（v0.1.0-9）**：`SettingsPanel` 显式指定 `width: 640px; height: 480px; x/y` 居中绑定，避免之前默认贴左上角。右键上下文菜单的 `x/y` 改为 `focus-scope.x/y + offset`，跟着卡片位置走。
 - **测试覆盖**：tray::tests 调整后 release profile 下 37 个单元测试全部通过（增加新图标 gradient 端点校验）。
 
-## 下一步：阶段 A1.7——索引可观察性
+## 已完成：阶段 A1.7——本地卷自动发现与热插拔
+
+- **UOS/Linux 卷发现（v0.1.0-12）**：`ruyiseekd` 默认读取 `/proc/self/mountinfo`，在 `$HOME` 之外自动加入 `/media/$USER`、`/run/media/$USER`、`/mnt`、`/data` 等位置的可读本地块设备；支持 ext4、XFS、Btrfs、exFAT、NTFS/fuseblk 和 LUKS device-mapper 等内核实际报告的本地文件系统。
+- **安全过滤**：不自动扫描 `/`、`/home`、`/boot`、`/usr`、`/var` 等操作系统树，排除 proc/sysfs/tmpfs/cgroup/overlay、loop/squashfs、NFS/CIFS/SSHFS；按 `major:minor + filesystem root` 去除 bind mount 重复项。mountinfo 的八进制转义按原始字节解码，带空格卷名可正常识别。
+- **运行期挂载检测**：后台线程每 2 秒比较一次卷集合。发现插盘、挂载、卸载后在旧索引继续服务的同时构建新索引，完成后通过 `RwLock` 原子切换；卸载卷的旧结果随新索引切换而移除。
+- **嵌套挂载边界**：挂载在 `$HOME` 内的新卷同样会触发重建；扫描器识别重叠根并阻止父根跨入子根，避免文件重复进入索引。
+- **多卷容量**：默认容量从固定全局 25 万调整为每个自动根 25 万、总上限 200 万；显式 `--max-entries` 仍保持用户指定的全局上限，显式 `--root` 则关闭自动卷发现。
+- **验证**：新增 mountinfo 解析、系统/网络/loop 过滤、转义路径、bind mount 去重、重叠根去重、自动容量与参数语义测试；受影响的 12 个测试及 Clippy `all + pedantic + -D warnings` 通过。
+
+## 下一步：阶段 A1.8——索引可观察性
 
 1. **结果标签细化**：当结果来自「最近打开」「固定应用」「命令历史」时给出不同的小标签，便于区分。
 2. **复制失败的可观测性**：当前 copy 路径只在 status bar 提示，下一步写入 stderr 便于从 `--background` 模式诊断。

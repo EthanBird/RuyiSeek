@@ -190,7 +190,8 @@ mod tests {
         //   x+y≥19 且 |x-y|≤2。两个端点都是非整数 t，所以这里按"亮端近似 #2a8aa3"
         //   和"暗端近似 #176b87"两个色域各出现一次来验证。
         let pixels: Vec<&[u8]> = icon.data.chunks_exact(4).collect();
-        let mut unique: std::collections::BTreeMap<[u8; 4], usize> = std::collections::BTreeMap::new();
+        let mut unique: std::collections::BTreeMap<[u8; 4], usize> =
+            std::collections::BTreeMap::new();
         for p in &pixels {
             let key = [p[0], p[1], p[2], p[3]];
             *unique.entry(key).or_insert(0) += 1;
@@ -208,8 +209,14 @@ mod tests {
             .filter(|(p, _)| p[0] == 255 && p[1] <= 26 && p[2] <= 110)
             .map(|(_, c)| *c)
             .sum::<usize>();
-        assert!(bright_count > 0, "icon should contain bright gradient pixels near #2a8aa3");
-        assert!(dark_count > 0, "icon should contain dark gradient pixels near #176b87");
+        assert!(
+            bright_count > 0,
+            "icon should contain bright gradient pixels near #2a8aa3"
+        );
+        assert!(
+            dark_count > 0,
+            "icon should contain dark gradient pixels near #176b87"
+        );
 
         // 不该再出现透明白色（旧版是白环）
         assert!(!pixels.iter().any(|p| *p == [255, 255, 255, 255]));
