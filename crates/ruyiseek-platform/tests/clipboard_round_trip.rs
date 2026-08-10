@@ -5,10 +5,11 @@
 //! 2. The advertised TARGETS list contains the expected MIME types.
 //! 3. Reading via `text/uri-list` returns the URI byte stream.
 
-use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
+#![cfg(all(target_os = "linux", feature = "x11"))]
+
+use ruyiseek_platform::x11_clipboard::{set_clipboard, ClipboardMime, ClipboardOwner};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[test]
 fn clipboard_round_trip_under_xvfb() {
@@ -18,7 +19,9 @@ fn clipboard_round_trip_under_xvfb() {
     }
     // 1. 设剪贴板：用 ruyiseek-platform 的 x11_clipboard 模块写一段 UTF-8 文本。
     let payload = "如意寻 clipboard integration test \u{2728}";
-    run_clipboard_setter(payload, "text");
+    let Some(_owner) = run_clipboard_setter(payload, ClipboardMime::Text) else {
+        return;
+    };
     // 给 X server + 缓存一点点时间
     std::thread::sleep(Duration::from_millis(50));
 
@@ -56,7 +59,9 @@ fn clipboard_uri_list_round_trip_under_xvfb() {
         return;
     }
     let payload = "file:///home/syc/example.txt\nfile:///tmp/另一个.md\n";
-    run_clipboard_setter(payload, "uri");
+    let Some(_owner) = run_clipboard_setter(payload, ClipboardMime::UriList) else {
+        return;
+    };
     std::thread::sleep(Duration::from_millis(50));
 
     let output = Command::new("xclip")
@@ -81,65 +86,14 @@ fn clipboard_uri_list_round_trip_under_xvfb() {
     eprintln!("xclip text/uri-list 读取失败，跳过断言");
 }
 
-/// 在测试里直接调 x11_clipboard 不方便（要先 build 一个 test-only 的
-/// helper binary）。这里退一步：spawn `xclip -i` 自己写，再 spawn xclip
-/// 读回，校验自洽 —— 然后再走我们的模块，对照看是否能完整 round-trip。
-///
-/// 真正对我们模块的校验放在 `clipboard_round_trip_under_xvfb`：那个
-/// 测试会通过 setter 写完再让 xclip 读回，链路是模块 → X server → xclip。
-fn run_clipboard_setter(payload: &str, mime: &str) {
-    // 把 setter 调起来。用 stdin pipe 把 payload 灌进去，setter 内部
-    // 调 x11_clipboard::set_clipboard 写。
-    let mut child = match Command::new(env!("CARGO_BIN_EXE_clipboard_test_helper"))
-        .args(["--mime", mime])
-        .env("DISPLAY", std::env::var("DISPLAY").unwrap_or_default())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
+/// Start the real RuyiSeek clipboard owner and keep its guard alive while the
+/// independent xclip client reads the selection back.
+fn run_clipboard_setter(payload: &str, mime: ClipboardMime) -> Option<ClipboardOwner> {
+    match set_clipboard(payload.as_bytes().to_vec(), mime) {
+        Ok(owner) => Some(owner),
         Err(error) => {
-            eprintln!("helper 启动失败：{error}");
-            return;
-        }
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(payload.as_bytes());
-    }
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline {
-        if let Ok(Some(_)) = child
-            .stdout
-            .as_mut()
-            .and_then(|_| None::<UnixStream>.map(|_| Ok(0)).transpose())
-        {
-            break;
-        }
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return,
-            Ok(Some(_)) => return,
-            _ => std::thread::sleep(Duration::from_millis(50)),
-        }
-    }
-    let _ = child.kill();
-}
-
-/// 借一个读 socket 用来 select 的占位（实际 helper 是同步的）。
-trait MaybeAsync {
-    type Output;
-    fn poll(&mut self) -> std::io::Result<Option<Self::Output>>;
-}
-
-impl MaybeAsync for UnixStream {
-    type Output = ();
-    fn poll(&mut self) -> std::io::Result<Option<()>> {
-        let mut buf = [0u8; 16];
-        match self.read(&mut buf) {
-            Ok(0) => Ok(Some(())),
-            Ok(_) => Ok(None),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
-            Err(error) => Err(error),
+            eprintln!("RuyiSeek clipboard owner 启动失败：{error}；跳过 X11 集成测试");
+            None
         }
     }
 }

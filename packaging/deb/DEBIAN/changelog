@@ -21,6 +21,9 @@ ruyiseek (0.1.0-12) unstable; urgency=medium
     musl release target without its standard library or release toolchain.
   * Fix the v0.1.0-11 X11 clipboard TARGETS array lifetime for Rust 1.75;
     keep the fixed-size atom array by value instead of borrowing temporaries.
+  * Repair the X11 clipboard integration test: call the real in-process owner
+    instead of a nonexistent helper binary, remove invalid placeholder polling,
+    and compile the test only when the x11 feature is enabled.
 
  -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 03:30:00 +0000
 

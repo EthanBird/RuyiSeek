@@ -36,7 +36,7 @@ fn main() -> ExitCode {
     };
     println!("writing payload: {payload:?} as {mime:?}");
 
-    let owner = match set_clipboard(payload.as_bytes().to_vec(), mime) {
+    let _owner = match set_clipboard(payload.as_bytes().to_vec(), mime) {
         Ok(owner) => owner,
         Err(error) => {
             eprintln!("set_clipboard failed: {error}");
