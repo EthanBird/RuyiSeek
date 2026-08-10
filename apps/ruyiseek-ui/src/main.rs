@@ -112,14 +112,14 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
         &generation,
         &result_paths,
         Rc::clone(&visible),
-        Rc::clone(&clipboard_owner),
+        &clipboard_owner,
     );
     install_settings_callbacks(
         &launcher,
         Rc::clone(&app_config),
         config_path,
         hotkey_control.clone(),
-        Rc::clone(&visible),
+        &visible,
     );
 
     let _hotkey_thread = install_hotkey(&ui_sender, hotkey_control);
@@ -156,13 +156,16 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+// Callback registration is intentionally kept together so each generated UI
+// signal has one obvious wiring site.
+#[allow(clippy::too_many_lines)]
 fn install_ui_callbacks(
     launcher: &LauncherWindow,
     worker_sender: Sender<WorkerCommand>,
     generation: &Rc<Cell<u64>>,
     result_paths: &Rc<RefCell<Vec<PathBuf>>>,
     visible: Rc<Cell<bool>>,
-    clipboard_owner: Rc<RefCell<Option<ClipboardOwner>>>,
+    clipboard_owner: &Rc<RefCell<Option<ClipboardOwner>>>,
 ) {
     let weak_launcher = launcher.as_weak();
     let callback_generation = Rc::clone(generation);
@@ -251,7 +254,7 @@ fn install_ui_callbacks(
         let Some(path) = copy_paths.borrow().get(index).cloned() else {
             return;
         };
-        match copy_file_to_clipboard(&path, Rc::clone(&copy_clipboard)) {
+        match copy_file_to_clipboard(&path, copy_clipboard.as_ref()) {
             Ok(()) => launcher.set_status_text("已复制文件到剪贴板".into()),
             Err(error) => launcher.set_status_text(format!("复制文件失败：{error}").into()),
         }
@@ -270,7 +273,7 @@ fn install_ui_callbacks(
         let Some(path) = copy_path_paths.borrow().get(index).cloned() else {
             return;
         };
-        match copy_path_to_clipboard(&path, Rc::clone(&copy_path_clipboard)) {
+        match copy_path_to_clipboard(&path, copy_path_clipboard.as_ref()) {
             Ok(()) => launcher.set_status_text("已复制路径到剪贴板".into()),
             Err(error) => launcher.set_status_text(format!("复制路径失败：{error}").into()),
         }
@@ -294,7 +297,7 @@ fn install_settings_callbacks(
     app_config: Rc<RefCell<config::AppConfig>>,
     config_path: Option<PathBuf>,
     hotkey_control: DoubleCtrlControl,
-    visible: Rc<Cell<bool>>,
+    visible: &Rc<Cell<bool>>,
 ) {
     let weak_launcher = launcher.as_weak();
     let visible_for_close = Rc::clone(&visible);
@@ -756,7 +759,7 @@ fn ensure_daemon_running() {
                 // SAFETY: setsid is async-signal-safe and only fails if the
                 // calling process is already a process-group leader. The
                 // freshly-forked child is not a leader, so this is fine.
-                if unsafe { libc::setsid() } == -1 {
+                if libc::setsid() == -1 {
                     return Err(io::Error::last_os_error());
                 }
                 Ok(())
@@ -835,7 +838,7 @@ fn stop_daemon() -> Result<(), String> {
         })
 }
 
-fn open_path(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+fn open_path(path: &Path) -> Result<(), Box<dyn Error>> {
     Command::new("xdg-open")
         .arg(path)
         .stdin(Stdio::null())
@@ -850,13 +853,12 @@ fn open_path(path: &PathBuf) -> Result<(), Box<dyn Error>> {
 fn reveal_parent(path: &Path) -> PathBuf {
     path.parent()
         .filter(|p| !p.as_os_str().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
+        .map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 /// 在文件管理器中显示给定路径所在的目录。仅取父目录后委托给 xdg-open，
 /// 由 desktop portal / dbus 选型（dde-file-manager、nautilus、thunar 等）。
-fn reveal_in_file_manager(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+fn reveal_in_file_manager(path: &Path) -> Result<(), Box<dyn Error>> {
     Command::new("xdg-open")
         .arg(reveal_parent(path))
         .stdin(Stdio::null())
@@ -868,11 +870,11 @@ fn reveal_in_file_manager(path: &PathBuf) -> Result<(), Box<dyn Error>> {
 
 /// 把文件（而非路径字符串）放到剪贴板。文件管理器可以把剪贴板里的 URI
 /// 粘到目标目录，相当于"复制-粘贴"的源头。完全用纯 Rust 实现 X11
-/// CLIPBOARD 协议（见 ruyiseek_platform::x11_clipboard），不再依赖
+/// CLIPBOARD 协议（见 `ruyiseek_platform::x11_clipboard`），不再依赖
 /// xclip/wl-copy，这样离线机器零依赖就能复制。
 fn copy_file_to_clipboard(
-    path: &PathBuf,
-    slot: Rc<RefCell<Option<ClipboardOwner>>>,
+    path: &Path,
+    slot: &RefCell<Option<ClipboardOwner>>,
 ) -> Result<(), String> {
     let uri = format!("file://{}\n", path.display());
     if let Some(prev) = slot.borrow_mut().take() {
@@ -887,8 +889,8 @@ fn copy_file_to_clipboard(
 /// 把路径字符串放到剪贴板。区别是写入的是纯文本（无 URI 包装），
 /// 适合"把当前路径贴到终端"这种场景。
 fn copy_path_to_clipboard(
-    path: &PathBuf,
-    slot: Rc<RefCell<Option<ClipboardOwner>>>,
+    path: &Path,
+    slot: &RefCell<Option<ClipboardOwner>>,
 ) -> Result<(), String> {
     let text = format!("{}\n", path.display());
     if let Some(prev) = slot.borrow_mut().take() {
@@ -931,7 +933,7 @@ enum UiEvent {
     Shutdown(Result<(), String>),
     Desktop(DesktopAction),
     HotkeyIssue(String),
-    /// Arrow key observed on the XInput2 raw stream. Delivered *unconditionally*
+    /// Arrow key observed on the `XInput2` raw stream. Delivered *unconditionally*
     /// from the hotkey worker; the consumer must check `visible` before
     /// updating the selection, because raw events fire for every press on the
     /// X server regardless of which window has focus.

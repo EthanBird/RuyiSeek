@@ -30,6 +30,8 @@ ruyiseek (0.1.0-12) unstable; urgency=medium
     workspace-wide strict Clippy gate.
   * Clean the standalone clipboard round-trip example for strict Clippy while
     retaining its linear, protocol-demonstration structure.
+  * Finish the Rust 1.75 strict-Clippy pass for UI callback ownership, path
+    APIs, detached daemon startup and integer-rendered tray icon gradients.
 
  -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 03:30:00 +0000
 

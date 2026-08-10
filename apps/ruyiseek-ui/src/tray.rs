@@ -5,6 +5,14 @@ use std::io;
 use std::sync::mpsc::Sender;
 use std::thread;
 
+// Gradient endpoints mirror packaging/icons/io.github.ethanbird.RuyiSeek.svg.
+const START_R: i32 = 42;
+const START_G: i32 = 138;
+const START_B: i32 = 163;
+const END_R: i32 = 23;
+const END_G: i32 = 107;
+const END_B: i32 = 135;
+
 pub(crate) struct TrayGuard {
     handle: ksni::Handle<RuyiTray>,
 }
@@ -123,17 +131,6 @@ fn make_icon(size: i32) -> Icon {
     let lens_radius = size * 2 / 5;
     let lens_thickness = (size / 7).max(1);
 
-    // 渐变起止色与 packaging/icons/io.github.ethanbird.RuyiSeek.svg 一致：
-    //   左上  #2a8aa3 (rgb 42,138,163)
-    //   右下  #176b87 (rgb 23,107,135)
-    // 在 16/22/32 px 的托盘图标上也能看出来微妙过渡。
-    const START_R: f32 = 42.0;
-    const START_G: f32 = 138.0;
-    const START_B: f32 = 163.0;
-    const END_R: f32 = 23.0;
-    const END_G: f32 = 107.0;
-    const END_B: f32 = 135.0;
-
     for y in 0..size {
         for x in 0..size {
             let lens_x = 2 * x - lens_center;
@@ -148,14 +145,14 @@ fn make_icon(size: i32) -> Icon {
                 && x + y >= size * 6 / 5
                 && (x - y).abs() <= lens_thickness;
 
-            // 渐变进度 t 用对角线坐标 (x + y) / (2 * (size-1))，从 0 到 1。
-            let denom = (2.0 * (size - 1) as f32).max(1.0);
-            let t = ((x + y) as f32 / denom).clamp(0.0, 1.0);
+            // 用整数插值避免托盘像素转换时产生平台相关的浮点截断。
+            let denominator = (2 * (size - 1)).max(1);
+            let numerator = (x + y).clamp(0, denominator);
 
             let pixel = if ring || handle {
-                let r = (START_R + (END_R - START_R) * t).round() as u8;
-                let g = (START_G + (END_G - START_G) * t).round() as u8;
-                let b = (START_B + (END_B - START_B) * t).round() as u8;
+                let r = lerp_channel(START_R, END_R, numerator, denominator);
+                let g = lerp_channel(START_G, END_G, numerator, denominator);
+                let b = lerp_channel(START_B, END_B, numerator, denominator);
                 [255, r, g, b]
             } else {
                 [0, 0, 0, 0]
@@ -169,6 +166,12 @@ fn make_icon(size: i32) -> Icon {
         height: size,
         data,
     }
+}
+
+fn lerp_channel(start: i32, end: i32, numerator: i32, denominator: i32) -> u8 {
+    let value =
+        (start * (denominator - numerator) + end * numerator + denominator / 2) / denominator;
+    u8::try_from(value.clamp(0, 255)).expect("interpolated color channel must fit in u8")
 }
 
 #[cfg(test)]
