@@ -1,5 +1,5 @@
 Package: ruyiseek
-Version: 0.1.0-12
+Version: 0.1.0-13
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -28,15 +28,15 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
   * `ruyiseek-ui` 动态链接到系统 glibc（Slint/winit 通过 dlopen 加载
     libX11.so.6 等 X11 客户端库，而 musl-static 的 dlopen 是桩函数）。
  .
- 因此 `ruyiseek-ui` 需要运行时存在 libc6 / libgcc1 与若干 X11 库；
- `ruyi` 与 `ruyiseekd` 不依赖这些。安装路径只需 `dpkg -i ./xxx.deb`
- 或 `apt install ./xxx.deb`，无需 `apt-get -f`。
+ 因此 `ruyiseek-ui` 只要求目标系统已有 libc6 基础栈；libgcc1、X11 与
+ 字体运行库随本包提供，`ruyi` 与 `ruyiseekd` 则为静态程序。安装只需
+ `dpkg -i ./xxx.deb` 或 `apt install ./xxx.deb`，无需 `apt-get -f`。
  .
- v0.1.0-10 起 `ruyiseek-ui` 把 glibc 基础栈、X11 客户端栈、字体栈
- 与动态链接器全部内联进 /usr/lib/ruyiseek/，二进制 PT_INTERP /
- DT_RPATH 已 patchelf 到该目录；离线（无 apt 仓库）机器上
+ v0.1.0-13 起 `ruyiseek-ui` 把 X11 客户端栈、字体栈与 C++ 运行库
+ 内联进 /usr/lib/ruyiseek/，并在链接阶段写入相对 DT_RPATH；glibc 与
+ 动态链接器使用 UOS 的 libc6 基础包。离线（无 apt 仓库）机器上
  `dpkg -i ./xxx.deb` 即可，不依赖 apt 拉任何运行时依赖（仅 Depends
- `libc6 (>= 2.28)`，用于 ldconfig 与 dynamic loader 注册）。
+ `libc6 (>= 2.28)`，它是 UOS 20 的系统基础包）。
  .
  v0.1.0-11 起 `ruyiseek-ui` 的"复制文件 / 复制路径"完全用纯 Rust
  实现的 X11 CLIPBOARD 协议，不再 spawn xclip/wl-copy；启动器结果
@@ -48,4 +48,8 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  的可读本地数据卷，并在运行期间检测挂载/卸载后后台重建、原子切换
  内存索引；系统树、loop、网络文件系统与重复 bind mount 默认排除。
  自动索引容量按每个根 25 万条扩展，总上限 200 万条。
-Installed-Size: 13660
+ .
+ v0.1.0-13 修复 UOS 发布包：共享库软链接与真实 ELF 文件会一起打包，
+ 并通过隔离动态加载器验证；构建不再依赖绝对路径、历史 target 缓存、
+ musl-stage 或临时 shim.o，deb 中也不再混入构建辅助脚本。
+Installed-Size: 0

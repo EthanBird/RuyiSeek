@@ -1,77 +1,26 @@
-# --- libgcc_s.so.1 elimination: musl target + rust-lld + shim ---
-#
-# The release binaries on x86_64-unknown-linux-gnu pull in libgcc_s.so.1 at
-# runtime. The cause is dynamic ABI-tagged GCC_3.0 references
-# (`_Unwind_Resume`, `_Unwind_GetIP`, …) emitted by `std::backtrace_rs`.
-# These live in libgcc_s.so.1 exclusively; libgcc_eh.a and libgcc.a do
-# not contain them on Debian-family distros. musl's libc.a has its own
-# unwinder, so the dynamic reference chain disappears.
-#
-# Strategy:
-#
-# 1. Build everything for x86_64-unknown-linux-musl. The Rust musl target
-#    ships its own self-contained libc.a + crt1.o under
-#    rustlib/x86_64-unknown-linux-musl/lib/self-contained/ — and these
-#    provide dlopen/dlsym/dlerror and a musl-internal unwinder. The
-#    resulting binary does not link against any system C library, so
-#    libgcc_s.so.1, libc.so.6, libdl.so.2, etc. all disappear.
-# 2. `panic = "abort"` drops the panic_unwind shim and any
-#    `_Unwind_RaiseException` references that panic paths might emit.
-# 3. Link with rust-lld (the rust toolchain's bundled LLD). rust-lld
-#    understands rust-specific relocations that system ld does not,
-#    notably the `_start` auxiliary-vector relocation that resolves to
-#    `_DYNAMIC` for dynamic executables and to the `.init_array`/
-#    `.fini_array`/DTORS for static ones — without rust-lld the
-#    relocation can collapse to address 0 and crash in _start_c.
-# 4. The vendored `libdbus` is compiled via cc-rs. We point cc-rs at
-#    the musl-stage wrapper at `/home/syc/musl-stage/x86_64-linux-musl-gcc`,
-#    which invokes the system gcc with `-specs`/`-B`/`-isystem`/`-L`
-#    flags that resolve headers and libraries from the staged musl
-#    sysroot. The produced dbus objects link cleanly against musl's
-#    libc.a.
-# 5. Even with rust-lld the link can leave a single undefined
-#    __dlerror/__dlopen/__dlclose if anything has hard-coded those glibc
-#    private names; `packaging/deb/shim.o` provides weak stubs.
-# 6. The .cargo/env.sh helper script exports PATH so the wrapper is
-#    discoverable as `x86_64-linux-musl-gcc` without installing
-#    musl-tools system-wide (no sudo required).
+# Keep the command-line client and daemon portable across the UOS 20 / Debian
+# 10 glibc baseline by building them for Rust's self-contained musl target.
+# These crates are pure Rust, so no host musl compiler, staged sysroot, shim
+# object, or machine-specific absolute path is required.
 
 [build]
 target = "x86_64-unknown-linux-musl"
-
-[env]
-CC_x86_64_unknown_linux_musl = "x86_64-linux-musl-gcc"
-CXX_x86_64_unknown_linux_musl = "x86_64-linux-musl-gcc"
-AR_x86_64_unknown_linux_musl = "ar"
 
 [target.x86_64-unknown-linux-musl]
 linker = "rust-lld"
 rustflags = [
     "-C", "panic=abort",
-    "-C", "link-arg=-L/home/syc/musl-stage/usr/lib/x86_64-linux-musl",
-    "-C", "link-arg=/home/syc/RuyiSeek/packaging/deb/shim.o",
     "-C", "link-arg=--as-needed",
 ]
-# Cargo passes `-l <crate>` to rust-lld for native deps. The
-# libloading crate (used by ruyiseek-platform tests for dlopen/dlsym)
-# asks for `-ldl`, but rust-lld cannot find it without an explicit
-# `-L` for the staged musl sysroot. The test-only flag below is
-# honored only when the test harness links (it does not affect
-# release builds because rust-lld ignores `-ldl` when the binary
-# pulls no dl* symbols).
-#
-# Test note: `cargo test` for x86_64-unknown-linux-musl requires
-# `RUSTFLAGS=` (empty) to be exported because panic=abort in the
-# rustflags above is incompatible with `cargo test` without the
-# nightly `-Zpanic_abort_tests`.
 
-# Defense-in-depth for any cross-target build (e.g. CI building both
-# targets). Has no effect on the default musl build. Structurally
-# cannot remove libgcc_s.so.1 from glibc-linked binaries on Debian —
-# documented for completeness.
+# The UI is selected explicitly by packaging/deb/build.sh because Slint/winit
+# needs glibc's working dlopen implementation for the X11 client libraries.
 [target.x86_64-unknown-linux-gnu]
 linker = "cc"
 rustflags = [
     "-C", "panic=abort",
     "-C", "link-arg=-static-libgcc",
+    # UOS ships patchelf 0.10, which corrupts this Rust PIE when changing
+    # PT_INTERP or RPATH. Set a transitive DT_RPATH at link time instead.
+    "-C", "link-arg=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib/ruyiseek",
 ]

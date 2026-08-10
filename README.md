@@ -43,12 +43,12 @@ cargo test --workspace
 
 ## 安装包（DEB）
 
-单文件 `.deb` 已自带所有运行时库依赖（`libc6`、`libgcc1`、`libx11-6` 等标准 GUI 栈），在统信 UOS 20 / Deepin / Debian 10+ 主机上直接装：
+单文件 `.deb` 已自带除系统 `libc6` 基础栈以外的运行时库（`libgcc1`、X11、字体等 GUI 栈）；UOS 20 本身已提供所需的 glibc 2.28，因此可直接安装：
 
 ```bash
-sudo apt install ./dist/ruyiseek_0.1.0-12_amd64.deb
+sudo apt install ./dist/ruyiseek_0.1.0-13_amd64.deb
 # 或
-sudo dpkg -i dist/ruyiseek_0.1.0-12_amd64.deb
+sudo dpkg -i dist/ruyiseek_0.1.0-13_amd64.deb
 ```
 
 无需 `apt-get -f install`，也无需先编译。装完后登录桌面，托盘自动出现；双击 Ctrl 唤起启动器，回车打开搜索项。如需重新构建产物：
@@ -58,6 +58,18 @@ bash packaging/deb/build.sh
 ```
 
 构建脚本对 `ruyiseekd` 与 `ruyi` 走 `x86_64-unknown-linux-musl`（纯静态），`ruyiseek-ui` 走 `x86_64-unknown-linux-gnu`（动态链接，因为 winit/x11-dl 在运行时 `dlopen` `libX11.so.6`，musl-static 的 `dlopen` 是桩函数）。
+
+构建脚本不会调用 apt、rustup 或其他安装器；它只使用主机已有的 Rust target 与打包工具，缺少时会直接报告并退出。已有 Cargo 源码缓存的离线构建可使用：
+
+```bash
+CARGO_NET_OFFLINE=true bash packaging/deb/build.sh
+```
+
+生成的 `.deb` 会自动执行包结构、glibc 2.28 ABI、隔离共享库解析和无图形 UI 烟测，并在同目录生成 `.sha256`。完整 daemon/CLI 协议测试可执行：
+
+```bash
+bash packaging/deb/verify.sh dist/ruyiseek_0.1.0-13_amd64.deb
+```
 
 ## 本地演示
 

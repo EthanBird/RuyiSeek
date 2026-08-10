@@ -78,7 +78,7 @@
     - 复制路径（`xclip` / `wl-copy` 写纯文本路径）。
   关闭路径：点击结果行、点击菜单项、编辑搜索框、进入设置面板、再次唤起 launcher，都会把 `popup-index` 复位回 -1。Suggests 加上 `xclip` 与 `wl-clipboard`，首次安装保持干净。
 - **daemon HOME 默认值**：见 A1.5 末条，已落入 v0.1.0-7。
-- **构建可重复性**：`packaging/deb/shim.c` 移到 `packaging/shim.c`，build.sh 每次 cargo 之前 `cc -c` 编译为 `packaging/deb/shim.o`，避免清理后第二次构建报 `cannot open shim.o`。
+- **构建可重复性（v0.1.0-13）**：CLI/daemon 直接使用 Rust 自带 musl target 与 rust-lld，不再依赖绝对路径、musl-stage 或会被清理的 shim.o；deb 在临时 staging 中组装，不修改源码模板。UI 的 `$ORIGIN` RPATH 在链接阶段生成，避开 UOS patchelf 0.10 对 Rust PIE 的破坏。
 - **点击空白处隐藏启动器（v0.1.0-9）**：Window 改为 960×600 透明无边框 + 始终置顶；外层 `dismiss-area` TouchArea 在 focus-scope 下方 z-order，吃掉空白点击并触发 `root.dismiss()`；卡片内部的 `card-bg-touch` 在搜索框/结果行之下，吃掉 padding 点击但只把焦点送回搜索框。两个 TouchArea 配合保证：点空白 → 隐藏；点卡片 padding → 不消失、只聚焦；点结果行 / 搜索框 → 沿用既有 activate / 光标处理。
 - **Esc 直接隐藏（v0.1.0-9）**：之前 Esc 是"先清空再隐藏"两段式，焦点卡的 key-pressed 现在单步调用 `root.dismiss()`，多余输入保留为空状态隐藏即可；用户想清空输入不隐藏时仍可用 Ctrl+L 或手动选中删除。
 - **第二次双击 Ctrl 不再保留上次结果（v0.1.0-9）**：Slint 1.6 的 `LineEdit::edited` 回调只在用户输入时触发，程序化 `set_query("")` 不会触发；因此 `show_launcher` 与 `apply_desktop_action` 现在显式接受 `result_paths` 与 `generation` 句柄，每次唤起时显式清空 results 模型、`result_paths` 向量、`selected-index`、query、`generation` 自增、`status_text` 重置为 idle。in-flight 的过期响应因 generation 不匹配被直接丢弃。
@@ -95,6 +95,12 @@
 - **嵌套挂载边界**：挂载在 `$HOME` 内的新卷同样会触发重建；扫描器识别重叠根并阻止父根跨入子根，避免文件重复进入索引。
 - **多卷容量**：默认容量从固定全局 25 万调整为每个自动根 25 万、总上限 200 万；显式 `--max-entries` 仍保持用户指定的全局上限，显式 `--root` 则关闭自动卷发现。
 - **验证**：新增 mountinfo 解析、系统/网络/loop 过滤、转义路径、bind mount 去重、重叠根去重、自动容量与参数语义测试；受影响的 12 个测试及 Clippy `all + pedantic + -D warnings` 通过。
+
+## 已完成：阶段 A1.7.1——UOS 20 安装包修复
+
+- v0.1.0-12 的共享库复制只保留了 SONAME 软链接，漏掉 26 个真实 ELF 目标；其 ldd 自检又会回退到已安装旧包，因此产生假成功。v0.1.0-13 会复制真实文件、重建相对软链接，并拒绝任何悬空链接。
+- UI 使用系统 libc6/loader 的匹配补丁版本，随包提供 X11、字体、libgcc/libstdc++ 等非 glibc 闭包；隔离解析只允许 glibc 基础库落到系统目录。
+- 新增 `packaging/deb/verify.sh`，检查包根、静态二进制、glibc 2.28 符号上限、RPATH、共享库解析、无显示 UI 模式和 daemon/CLI 协议。
 
 ## 下一步：阶段 A1.8——索引可观察性
 

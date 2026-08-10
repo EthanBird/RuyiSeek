@@ -34,3 +34,4 @@ pedantic = "warn"
 [profile.release]
 panic = "abort"
 opt-level = 3
+strip = "symbols"
