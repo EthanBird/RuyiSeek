@@ -77,7 +77,11 @@ jobs:
             staging/DEBIAN/control
 
           dpkg-deb --build --root-owner-group staging "$output_deb"
-          sha256sum "$output_deb" > "${output_deb}.sha256"
+          (
+            cd dist
+            sha256sum ruyiseek_0.1.0-12_amd64.deb \
+              > ruyiseek_0.1.0-12_amd64.deb.sha256
+          )
 
       - name: Validate package metadata and protocol smoke test
         run: |
@@ -112,7 +116,10 @@ jobs:
 
           file "$daemon" | grep -Eq 'static-pie linked|statically linked'
           ! readelf -d "$daemon" 2>/dev/null | grep -q NEEDED
-          sha256sum --check --strict "${deb}.sha256"
+          (
+            cd dist
+            sha256sum --check --strict ruyiseek_0.1.0-12_amd64.deb.sha256
+          )
 
       - name: Upload package and checksum to the release
         run: |
@@ -127,6 +134,7 @@ jobs:
             --json body \
             --jq .body > release-notes.md
           sed -i '/本次先发布已验证源码/d' release-notes.md
+          sed -i '/^## 安装包$/,$d' release-notes.md
           package_sha=$(cut -d' ' -f1 "${deb}.sha256")
           cat >> release-notes.md <<NOTES
 
