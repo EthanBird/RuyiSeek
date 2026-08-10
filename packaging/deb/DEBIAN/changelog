@@ -17,6 +17,8 @@ ruyiseek (0.1.0-12) unstable; urgency=medium
     bind/overlapping-root deduplication, automatic budgets and CLI behavior.
   * Normalize the v0.1.0-11 Rust sources with the repository's Rust 1.75
     rustfmt baseline so GitHub CI proceeds past its formatting gate.
+  * Run CI tests and Clippy on the native GNU target instead of inheriting the
+    musl release target without its standard library or release toolchain.
 
  -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 03:30:00 +0000
 

@@ -13,6 +13,12 @@ jobs:
     name: Rust 1.75 baseline
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The repository default is the musl release target and carries release-only
+    # linker flags. CI validates the workspace on the runner's native GNU target;
+    # package builds select musl explicitly in packaging/deb/build.sh.
+    env:
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
+      RUSTFLAGS: ""
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
