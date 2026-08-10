@@ -16,7 +16,10 @@ use x11rb::protocol::xinput::{
     ConnectionExt as XInputConnectionExt, Device, EventMask, KeyEventFlags, RawKeyPressEvent,
     XIEventMask,
 };
-use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as XProtoConnectionExt, Window};
+use x11rb::protocol::xproto::{
+    Atom, AtomEnum, ClientMessageEvent, ConnectionExt as XProtoConnectionExt,
+    EventMask as XEventMask, Window,
+};
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 
@@ -46,6 +49,135 @@ impl fmt::Display for HotkeyError {
 }
 
 impl std::error::Error for HotkeyError {}
+
+/// Return the physical pixel size of the default X11 root screen.
+///
+/// The UI uses this to size its transparent context-menu overlay. Keeping the
+/// query in the X11 platform module avoids adding another native dependency to
+/// the UI crate.
+///
+/// # Errors
+///
+/// Returns [`HotkeyError`] when the X11 connection fails or has no default
+/// screen entry.
+pub fn default_screen_size() -> Result<(u16, u16), HotkeyError> {
+    let (connection, screen_number) =
+        x11rb::connect(None).map_err(|error| HotkeyError(format!("连接 X11 失败：{error}")))?;
+    let screen = connection
+        .setup()
+        .roots
+        .get(screen_number)
+        .ok_or_else(|| HotkeyError("X11 未返回默认屏幕".to_owned()))?;
+    Ok((screen.width_in_pixels, screen.height_in_pixels))
+}
+
+/// Ask the EWMH-compatible X11 window manager to activate a top-level window.
+///
+/// This is used after the independent context-menu window closes. On UOS the
+/// menu otherwise leaves keyboard focus on the window beneath the launcher.
+///
+/// # Errors
+///
+/// Returns [`HotkeyError`] if the X11 connection or EWMH property requests fail,
+/// or when no client window has the requested UTF-8 title.
+pub fn activate_window_named(title: &str) -> Result<(), HotkeyError> {
+    let (connection, screen_number) =
+        x11rb::connect(None).map_err(|error| HotkeyError(format!("连接 X11 失败：{error}")))?;
+    let root = connection
+        .setup()
+        .roots
+        .get(screen_number)
+        .ok_or_else(|| HotkeyError("X11 未返回默认屏幕".to_owned()))?
+        .root;
+    let client_list = intern_atom(&connection, b"_NET_CLIENT_LIST")?;
+    let window_name = intern_atom(&connection, b"_NET_WM_NAME")?;
+    let utf8_string = intern_atom(&connection, b"UTF8_STRING")?;
+    let active_window = intern_atom(&connection, b"_NET_ACTIVE_WINDOW")?;
+
+    let clients = connection
+        .get_property(false, root, client_list, AtomEnum::WINDOW, 0, u32::MAX)
+        .map_err(display_error("查询 X11 客户端窗口失败"))?
+        .reply()
+        .map_err(display_error("读取 X11 客户端窗口失败"))?;
+    let mut candidates: Vec<Window> = clients
+        .value32()
+        .into_iter()
+        .flatten()
+        .collect();
+    // Deepin's window manager omits Slint's borderless launcher from
+    // _NET_CLIENT_LIST, although it remains a direct child of the root window.
+    candidates.extend(
+        connection
+            .query_tree(root)
+            .map_err(display_error("查询 X11 顶层窗口失败"))?
+            .reply()
+            .map_err(display_error("读取 X11 顶层窗口失败"))?
+            .children,
+    );
+    let target = find_window_named(
+        &connection,
+        candidates,
+        window_name,
+        utf8_string,
+        title,
+    )
+        .ok_or_else(|| HotkeyError(format!("未找到 X11 窗口：{title}")))?;
+
+    let event = ClientMessageEvent::new(
+        32,
+        target,
+        active_window,
+        [1, x11rb::CURRENT_TIME, 0, 0, 0],
+    );
+    connection
+        .send_event(
+            false,
+            root,
+            XEventMask::SUBSTRUCTURE_REDIRECT | XEventMask::SUBSTRUCTURE_NOTIFY,
+            event,
+        )
+        .map_err(display_error("请求激活 X11 窗口失败"))?
+        .check()
+        .map_err(display_error("窗口管理器拒绝激活请求"))?;
+    connection
+        .flush()
+        .map_err(display_error("刷新 X11 激活请求失败"))
+}
+
+fn find_window_named(
+    connection: &RustConnection,
+    mut pending: Vec<Window>,
+    window_name: Atom,
+    utf8_string: Atom,
+    title: &str,
+) -> Option<Window> {
+    // DDE may reparent a borderless client underneath a compositor frame and
+    // may change that relationship while another top-level window is closing.
+    // Walk a bounded tree instead of assuming the client is a root child.
+    let mut inspected = 0_usize;
+    while let Some(window) = pending.pop() {
+        inspected += 1;
+        if inspected > 512 {
+            break;
+        }
+        if connection
+            .get_property(false, window, window_name, utf8_string, 0, u32::MAX)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .is_some_and(|reply| reply.value == title.as_bytes())
+        {
+            return Some(window);
+        }
+        if let Some(children) = connection
+            .query_tree(window)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+        {
+            pending.extend(children.children);
+        }
+    }
+    None
+}
 
 /// Preferences shared between the settings UI and the X11 listener.
 #[derive(Clone, Debug)]

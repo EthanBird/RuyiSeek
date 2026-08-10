@@ -79,6 +79,7 @@
   关闭路径：点击结果行、点击菜单项、编辑搜索框、进入设置面板、再次唤起 launcher，都会把 `popup-index` 复位回 -1。Suggests 加上 `xclip` 与 `wl-clipboard`，首次安装保持干净。
 - **daemon HOME 默认值**：见 A1.5 末条，已落入 v0.1.0-7。
 - **构建可重复性（v0.1.0-13）**：CLI/daemon 直接使用 Rust 自带 musl target 与 rust-lld，不再依赖绝对路径、musl-stage 或会被清理的 shim.o；deb 在临时 staging 中组装，不修改源码模板。UI 的 `$ORIGIN` RPATH 在链接阶段生成，避开 UOS patchelf 0.10 对 Rust PIE 的破坏。
+- **长列表与顶层右键菜单（v0.1.0-14）**：结果区改用带可拖动纵向滑块的 `ScrollView`；右键坐标使用行内真实鼠标位置并叠加负的 `viewport-y`。菜单拆成独立 Slint/X11 顶层窗口，按物理屏幕边缘限位，可越过启动器卡片边界；菜单外点击关闭后通过 EWMH 恢复启动器焦点。
 - **点击空白处隐藏启动器（v0.1.0-9）**：Window 改为 960×600 透明无边框 + 始终置顶；外层 `dismiss-area` TouchArea 在 focus-scope 下方 z-order，吃掉空白点击并触发 `root.dismiss()`；卡片内部的 `card-bg-touch` 在搜索框/结果行之下，吃掉 padding 点击但只把焦点送回搜索框。两个 TouchArea 配合保证：点空白 → 隐藏；点卡片 padding → 不消失、只聚焦；点结果行 / 搜索框 → 沿用既有 activate / 光标处理。
 - **Esc 直接隐藏（v0.1.0-9）**：之前 Esc 是"先清空再隐藏"两段式，焦点卡的 key-pressed 现在单步调用 `root.dismiss()`，多余输入保留为空状态隐藏即可；用户想清空输入不隐藏时仍可用 Ctrl+L 或手动选中删除。
 - **第二次双击 Ctrl 不再保留上次结果（v0.1.0-9）**：Slint 1.6 的 `LineEdit::edited` 回调只在用户输入时触发，程序化 `set_query("")` 不会触发；因此 `show_launcher` 与 `apply_desktop_action` 现在显式接受 `result_paths` 与 `generation` 句柄，每次唤起时显式清空 results 模型、`result_paths` 向量、`selected-index`、query、`generation` 自增、`status_text` 重置为 idle。in-flight 的过期响应因 generation 不匹配被直接丢弃。

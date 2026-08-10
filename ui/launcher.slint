@@ -1,4 +1,4 @@
-import { Button, CheckBox, LineEdit } from "std-widgets.slint";
+import { Button, CheckBox, LineEdit, ScrollView } from "std-widgets.slint";
 
 export struct LauncherResult {
     title: string,
@@ -227,6 +227,8 @@ export component LauncherWindow inherits Window {
     callback reveal-result(int);
     callback copy-file(int);
     callback copy-path(int);
+    callback show-context-menu(int, length, length);
+    callback close-context-menu();
     callback dismiss();
     callback save-settings(bool, bool, bool);
     callback close-settings();
@@ -245,12 +247,11 @@ export component LauncherWindow inherits Window {
     in-out property <bool> double-ctrl-enabled: true;
     in-out property <bool> suppress-in-fullscreen: true;
     in property <string> settings-status-text: "修改后点击保存";
-    // 结果 Flickable 当前滚出去的像素数，context-menu 用这个来对齐被
-    // 右键的行，而不是跟着 viewport 漂走。在 Flickable 内部通过
-    // `<=>` 双向绑定到 `results_flickable.viewport-y`，这样滑块
-    // 一动 context-menu 立刻知道。
+    // ScrollView 的 viewport-y 是非正值：向下滚动后，它表示内容相对
+    // 可视区域向上移动的偏移量。右键时把这个值加到行坐标，才能得到
+    // 鼠标在主窗口中的真实位置。
     in-out property <length> results-viewport-y: 0;
-    // 同时露在屏幕上的结果行数上限（超出部分在 Flickable 内滚动）。
+    // 同时露在屏幕上的结果行数上限（超出部分在 ScrollView 内滚动）。
     // 默认 10 行 ≈ 540px 高，再多就把 960x600 的居中窗口顶到屏幕外了。
     in-out property <int> visible-rows: 10;
 
@@ -298,7 +299,7 @@ export component LauncherWindow inherits Window {
         // + 8 + 12 (bottom pad) ≈ 110 + N*54。
         width: 720px;
         // 窗口高度：搜索栏 12+44、底部 padding 12+8 固定 ~76；中间留给结果
-        // 区域，但结果区最大只露 VISIBLE_ROWS 行（其余在 Flickable 里滚动），
+        // 区域，但结果区最大只露 VISIBLE_ROWS 行（其余在 ScrollView 里滚动），
         // 避免 50 条结果把窗口撑得比屏幕还高。每行 46px + 间距 8px。
         height: 76px + Math.min(root.results.length, root.visible-rows) * 54px;
         x: (parent.width - self.width) / 2;
@@ -376,7 +377,7 @@ export component LauncherWindow inherits Window {
                         font-size: 18px;
 
                         edited(text) => {
-                            root.popup-index = -1;
+                            root.close-context-menu();
                             root.selected-index = 0;
                             root.query-edited(text);
                         }
@@ -401,18 +402,17 @@ export component LauncherWindow inherits Window {
                     }
                 }
 
-                // 结果列表：results 最多 SEARCH_LIMIT=50 条，窗口里
-                // 最多露 visible-rows 行（默认 10），其余通过 Flickable
-                // 滚动查看。Flickable 的 viewport-y 实时反映滚动位置，
-                // 上下文菜单位置要减去这个偏移，否则菜单会跟着 viewport
-                // 漂走。
-                if root.results.length > 0 : results_flickable := Flickable {
+                // ScrollView 在右侧提供可拖动纵向滑块，也保留滚轮滚动。
+                // viewport-y 与 root 双向绑定，右键菜单据此换算鼠标位置。
+                if root.results.length > 0 : results-scroll-view := ScrollView {
                     height: Math.min(root.results.length, root.visible-rows) * 46px;
                     viewport-height: root.results.length * 46px;
-                    // 鼠标滚轮不会触发焦点转移，键盘 PageUp/PageDown
-                    // 由 focus-scope.key-pressed 接管。
+                    viewport-width: self.width;
                     viewport-y <=> root.results-viewport-y;
                     VerticalLayout {
+                        // 为右侧纵向滑块留出命中区域，避免遮住分数文本。
+                        width: results-scroll-view.width
+                            - (root.results.length > root.visible-rows ? 14px : 0px);
                         spacing: 0px;
                         for result[index] in root.results : Rectangle {
                             height: 46px;
@@ -422,22 +422,28 @@ export component LauncherWindow inherits Window {
                                 : result-touch.has-hover ? #edf4f7 : transparent;
 
                             result-touch := TouchArea {
-                                // 左键：若右键菜单正打开，则只关闭菜单不触发打开；
-                                // 用户需二次点击才打开所选项，符合常见 UX。
-                                // 右键：选中该行并弹出上下文菜单，位置由 popup-index 计算。
+                                // 左键打开结果，同时关闭可能存在的独立菜单窗口。
                                 clicked => {
+                                    root.close-context-menu();
                                     root.selected-index = index;
-                                    if (root.popup-index < 0) {
-                                        root.activate-result(index);
-                                    } else {
-                                        root.popup-index = -1;
-                                    }
+                                    root.activate-result(index);
                                 }
                                 pointer-event(event) => {
                                     if (event.button == PointerEventButton.right
                                             && event.kind == PointerEventKind.up) {
                                         root.selected-index = index;
                                         root.popup-index = index;
+                                        // TouchArea.mouse-x/y 是当前鼠标相对结果行的
+                                        // 坐标。64px = 卡片上边距 12 + 搜索框 44 +
+                                        // 布局间距 8；viewport-y 已经带负号。
+                                        root.show-context-menu(
+                                            index,
+                                            focus-scope.x + 12px
+                                                + result-touch.mouse-x + 2px,
+                                            focus-scope.y + 64px
+                                                + index * 46px + root.results-viewport-y
+                                                + result-touch.mouse-y + 2px
+                                        );
                                     }
                                 }
                             }
@@ -495,128 +501,6 @@ export component LauncherWindow inherits Window {
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-
-    // 右键弹出的上下文菜单，定义在 Window 顶层（focus-scope 之外）以保证 z-order
-    // 在结果行之上。Slint 1.6 没有内置 PopupMenu/MenuItem，这里手写一个浮层
-    // 菜单：每个动作是一个 Rectangle + TouchArea，命中后回调到 Rust 并把
-    // popup-index 重置回 -1 完成关闭。位置相对 focus-scope 的左上角：focus-scope
-    // 已经用 x/y 居中放置，菜单同样相对 focus-scope 定位，保证在不同窗口大小下
-    // 菜单与被右键的结果行对齐。
-    context-menu := Rectangle {
-        visible: root.popup-index >= 0 && !root.settings-mode;
-        width: 188px;
-        height: 4 * 32px + 8px;
-        x: focus-scope.x + 12px;
-        // viewport-y 是结果区 Flickable 当前滚出去的像素数；菜单
-        // 必须跟着滚动，否则用户滚到第 30 行右键，菜单还会停在
-        // 第 popup-index 行的位置上，完全错位。
-        y: focus-scope.y + 82px + root.popup-index * 46px + 2px - root.results-viewport-y;
-        border-radius: 8px;
-        background: #f7fafcee;
-        border-color: #cbd7e3aa;
-        border-width: 1px;
-        drop-shadow-blur: 14px;
-        drop-shadow-color: #10263a40;
-        drop-shadow-offset-y: 6px;
-        clip: true;
-
-        VerticalLayout {
-            padding: 4px;
-            spacing: 0px;
-
-            Rectangle {
-                height: 32px;
-                border-radius: 6px;
-                background: open-touch.has-hover ? #dcecf2 : transparent;
-
-                open-touch := TouchArea {
-                    clicked => {
-                        root.activate-result(root.popup-index);
-                        root.popup-index = -1;
-                    }
-                }
-
-                Text {
-                    text: "打开";
-                    color: #152735;
-                    font-size: 13px;
-                    horizontal-alignment: left;
-                    vertical-alignment: center;
-                    x: 12px;
-                    width: parent.width - 24px;
-                }
-            }
-
-            Rectangle {
-                height: 32px;
-                border-radius: 6px;
-                background: reveal-touch.has-hover ? #dcecf2 : transparent;
-
-                reveal-touch := TouchArea {
-                    clicked => {
-                        root.reveal-result(root.popup-index);
-                        root.popup-index = -1;
-                    }
-                }
-
-                Text {
-                    text: "打开所在文件夹";
-                    color: #152735;
-                    font-size: 13px;
-                    horizontal-alignment: left;
-                    vertical-alignment: center;
-                    x: 12px;
-                    width: parent.width - 24px;
-                }
-            }
-
-            Rectangle {
-                height: 32px;
-                border-radius: 6px;
-                background: copy-touch.has-hover ? #dcecf2 : transparent;
-
-                copy-touch := TouchArea {
-                    clicked => {
-                        root.copy-file(root.popup-index);
-                        root.popup-index = -1;
-                    }
-                }
-
-                Text {
-                    text: "复制文件";
-                    color: #152735;
-                    font-size: 13px;
-                    horizontal-alignment: left;
-                    vertical-alignment: center;
-                    x: 12px;
-                    width: parent.width - 24px;
-                }
-            }
-
-            Rectangle {
-                height: 32px;
-                border-radius: 6px;
-                background: copy-path-touch.has-hover ? #dcecf2 : transparent;
-
-                copy-path-touch := TouchArea {
-                    clicked => {
-                        root.copy-path(root.popup-index);
-                        root.popup-index = -1;
-                    }
-                }
-
-                Text {
-                    text: "复制路径";
-                    color: #152735;
-                    font-size: 13px;
-                    horizontal-alignment: left;
-                    vertical-alignment: center;
-                    x: 12px;
-                    width: parent.width - 24px;
                 }
             }
         }

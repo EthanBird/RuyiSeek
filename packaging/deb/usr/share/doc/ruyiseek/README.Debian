@@ -7,11 +7,11 @@ buster）和 Deepin 桌面环境构建。
 安装
 ----
 
-    sudo apt install ./ruyiseek_0.1.0-13_amd64.deb
+    sudo apt install ./ruyiseek_0.1.0-14_amd64.deb
 
 或：
 
-    sudo dpkg -i ruyiseek_0.1.0-13_amd64.deb
+    sudo dpkg -i ruyiseek_0.1.0-14_amd64.deb
 
 本包已经内置 UI 所需的 UOS 20 共享库闭包，不需要联网补装 X11、字体或
 其他运行时依赖。

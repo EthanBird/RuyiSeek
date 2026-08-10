@@ -1,5 +1,5 @@
 Package: ruyiseek
-Version: 0.1.0-13
+Version: 0.1.0-14
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -40,7 +40,7 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  .
  v0.1.0-11 起 `ruyiseek-ui` 的"复制文件 / 复制路径"完全用纯 Rust
  实现的 X11 CLIPBOARD 协议，不再 spawn xclip/wl-copy；启动器结果
- 列表最多露 10 行 + Flickable 滚动，搜索结果上限从 9 提到 50；
+ 列表最多露 10 行 + ScrollView 滚动，搜索结果上限从 9 提到 50；
  查询引擎支持多关键词 AND、首字母 acronym 命中、按 / 切段的路径
  段位加权。
  .
@@ -52,4 +52,8 @@ Description: 如意寻 — UOS/DDE 全局文件与应用启动器
  v0.1.0-13 修复 UOS 发布包：共享库软链接与真实 ELF 文件会一起打包，
  并通过隔离动态加载器验证；构建不再依赖绝对路径、历史 target 缓存、
  musl-stage 或临时 shim.o，deb 中也不再混入构建辅助脚本。
+ .
+ v0.1.0-14 修复长结果列表交互：右侧提供可拖动滚动条；右键菜单按实际
+ 鼠标位置显示在独立 X11 顶层窗口中，可突破启动器边界，并在 UOS 下
+ 正确处理滚动偏移、屏幕边缘和菜单外点击。
 Installed-Size: 0

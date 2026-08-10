@@ -8,8 +8,10 @@ use ruyiseek_platform::hotkey::{
 use ruyiseek_platform::x11_clipboard::{
     set_clipboard as native_set_clipboard, ClipboardMime, ClipboardOwner,
 };
-use ruyiseek_platform::x11_hotkey::DoubleCtrlControl;
-use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
+use ruyiseek_platform::x11_hotkey::{
+    activate_window_named, default_screen_size, DoubleCtrlControl,
+};
+use slint::{ComponentHandle, ModelRc, PhysicalPosition, Timer, TimerMode, VecModel};
 use std::cell::{Cell, RefCell};
 use std::error::Error;
 use std::io;
@@ -21,11 +23,16 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-#[allow(clippy::all, clippy::pedantic)]
-mod generated_ui {
-    slint::include_modules!();
+#[allow(clippy::all, clippy::pedantic, dead_code, non_snake_case)]
+mod generated_launcher {
+    include!(concat!(env!("OUT_DIR"), "/launcher.rs"));
 }
-use generated_ui::{LauncherResult, LauncherWindow};
+#[allow(clippy::all, clippy::pedantic, dead_code, non_snake_case)]
+mod generated_context_menu {
+    include!(concat!(env!("OUT_DIR"), "/context-menu.rs"));
+}
+use generated_context_menu::ContextMenuWindow;
+use generated_launcher::{LauncherResult, LauncherWindow};
 
 mod autostart;
 mod config;
@@ -96,6 +103,7 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
     ensure_daemon_running();
 
     let launcher = LauncherWindow::new()?;
+    let context_menu = ContextMenuWindow::new()?;
     let visible = Rc::new(Cell::new(false));
     let generation = Rc::new(Cell::new(0_u64));
     let result_paths = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
@@ -116,6 +124,7 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
         Rc::clone(&visible),
         &clipboard_owner,
     );
+    install_context_menu_callbacks(&launcher, &context_menu);
     install_settings_callbacks(
         &launcher,
         Rc::clone(&app_config),
@@ -156,6 +165,131 @@ fn run_launcher(mode: LaunchMode) -> Result<(), Box<dyn Error>> {
     slint::run_event_loop_until_quit()?;
     drop(poll_timer);
     Ok(())
+}
+
+fn install_context_menu_callbacks(launcher: &LauncherWindow, menu: &ContextMenuWindow) {
+    let weak_launcher = launcher.as_weak();
+    let weak_menu = menu.as_weak();
+    launcher.on_show_context_menu(move |index, local_x, local_y| {
+        let (Some(launcher), Some(menu)) = (weak_launcher.upgrade(), weak_menu.upgrade()) else {
+            return;
+        };
+        show_context_menu(&launcher, &menu, index, local_x, local_y);
+    });
+
+    let weak_launcher = launcher.as_weak();
+    let weak_menu = menu.as_weak();
+    launcher.on_close_context_menu(move || {
+        let (Some(launcher), Some(menu)) = (weak_launcher.upgrade(), weak_menu.upgrade()) else {
+            return;
+        };
+        close_context_menu(&launcher, &menu, true);
+    });
+
+    let weak_launcher = launcher.as_weak();
+    let weak_menu = menu.as_weak();
+    menu.on_activate_result(move |index| {
+        let (Some(launcher), Some(menu)) = (weak_launcher.upgrade(), weak_menu.upgrade()) else {
+            return;
+        };
+        close_context_menu(&launcher, &menu, false);
+        launcher.invoke_activate_result(index);
+    });
+
+    let weak_launcher = launcher.as_weak();
+    let weak_menu = menu.as_weak();
+    menu.on_reveal_result(move |index| {
+        let (Some(launcher), Some(menu)) = (weak_launcher.upgrade(), weak_menu.upgrade()) else {
+            return;
+        };
+        close_context_menu(&launcher, &menu, false);
+        launcher.invoke_reveal_result(index);
+    });
+
+    let weak_launcher = launcher.as_weak();
+    let weak_menu = menu.as_weak();
+    menu.on_copy_file(move |index| {
+        let (Some(launcher), Some(menu)) = (weak_launcher.upgrade(), weak_menu.upgrade()) else {
+            return;
+        };
+        close_context_menu(&launcher, &menu, true);
+        launcher.invoke_copy_file(index);
+    });
+
+    let weak_launcher = launcher.as_weak();
+    let weak_menu = menu.as_weak();
+    menu.on_copy_path(move |index| {
+        let (Some(launcher), Some(menu)) = (weak_launcher.upgrade(), weak_menu.upgrade()) else {
+            return;
+        };
+        close_context_menu(&launcher, &menu, true);
+        launcher.invoke_copy_path(index);
+    });
+
+    let weak_launcher = launcher.as_weak();
+    let weak_menu = menu.as_weak();
+    menu.on_dismiss(move || {
+        let (Some(launcher), Some(menu)) = (weak_launcher.upgrade(), weak_menu.upgrade()) else {
+            return;
+        };
+        close_context_menu(&launcher, &menu, true);
+    });
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn show_context_menu(
+    launcher: &LauncherWindow,
+    menu: &ContextMenuWindow,
+    index: i32,
+    local_x: f32,
+    local_y: f32,
+) {
+    const MENU_WIDTH: f32 = 188.0;
+    const MENU_HEIGHT: f32 = 136.0;
+
+    let (screen_width, screen_height) = match default_screen_size() {
+        Ok(size) => size,
+        Err(error) => {
+            eprintln!("ruyiseek-ui: 无法读取 X11 屏幕尺寸，菜单将限制在启动器范围：{error}");
+            let size = launcher.window().size();
+            (
+                u16::try_from(size.width).unwrap_or(u16::MAX),
+                u16::try_from(size.height).unwrap_or(u16::MAX),
+            )
+        }
+    };
+    let launcher_position = launcher.window().position();
+    let launcher_scale = launcher.window().scale_factor();
+    let menu_scale = menu.window().scale_factor().max(f32::EPSILON);
+    let screen_logical_width = f32::from(screen_width) / menu_scale;
+    let screen_logical_height = f32::from(screen_height) / menu_scale;
+    let pointer_x = (launcher_position.x as f32 + local_x * launcher_scale) / menu_scale;
+    let pointer_y = (launcher_position.y as f32 + local_y * launcher_scale) / menu_scale;
+
+    menu.set_result_index(index);
+    menu.set_overlay_width(screen_logical_width);
+    menu.set_overlay_height(screen_logical_height);
+    menu.set_menu_x(pointer_x.clamp(0.0, (screen_logical_width - MENU_WIDTH).max(0.0)));
+    menu.set_menu_y(pointer_y.clamp(0.0, (screen_logical_height - MENU_HEIGHT).max(0.0)));
+    menu.window().set_position(PhysicalPosition::new(0, 0));
+    if let Err(error) = menu.show() {
+        eprintln!("ruyiseek-ui: 无法显示右键菜单：{error}");
+        launcher.set_popup_index(-1);
+    }
+}
+
+fn close_context_menu(launcher: &LauncherWindow, menu: &ContextMenuWindow, refocus: bool) {
+    let was_visible = menu.window().is_visible();
+    launcher.set_popup_index(-1);
+    if let Err(error) = menu.hide() {
+        eprintln!("ruyiseek-ui: 无法隐藏右键菜单：{error}");
+    }
+    if refocus && was_visible {
+        launcher.invoke_focus_query();
+        if let Err(error) = activate_window_named("如意寻") {
+            eprintln!("ruyiseek-ui: 菜单关闭后无法恢复搜索框焦点：{error}");
+        }
+    }
 }
 
 // Callback registration is intentionally kept together so each generated UI
@@ -286,6 +420,7 @@ fn install_ui_callbacks(
         let Some(launcher) = weak_launcher.upgrade() else {
             return;
         };
+        launcher.invoke_close_context_menu();
         if let Err(error) = launcher.hide() {
             eprintln!("ruyiseek-ui: 隐藏启动器失败：{error}");
         } else {
@@ -536,7 +671,7 @@ fn show_settings(
     launcher.set_suppress_in_fullscreen(config.suppress_in_fullscreen);
     launcher.set_settings_status_text("修改后点击保存".into());
     launcher.set_settings_mode(true);
-    launcher.set_popup_index(-1);
+    launcher.invoke_close_context_menu();
     if let Err(error) = launcher.show() {
         eprintln!("ruyiseek-ui: 显示设置窗口失败：{error}");
     } else {
@@ -557,7 +692,7 @@ fn show_launcher(
     generation: &Rc<Cell<u64>>,
 ) {
     launcher.set_settings_mode(false);
-    launcher.set_popup_index(-1);
+    launcher.invoke_close_context_menu();
     // 每次重新唤起时清掉上次的输入、结果与选择。注意：set_query("") 经
     // LineEdit 双向绑定同步 LineEdit 的文本，但 LineEdit 的 edited 回调
     // 只在用户键入时触发，编程式修改不会回调 —— 因此这里手动调用一遍
@@ -584,6 +719,7 @@ fn hide_launcher(launcher: &LauncherWindow, visible: &Cell<bool>) {
     if !visible.get() {
         return;
     }
+    launcher.invoke_close_context_menu();
     match launcher.hide() {
         Ok(()) => visible.set(false),
         Err(error) => eprintln!("ruyiseek-ui: 隐藏启动器失败：{error}"),

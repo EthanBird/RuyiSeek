@@ -1,0 +1,130 @@
+// 独立的全屏透明顶层窗口：菜单 Rectangle 可跨越 LauncherWindow 边界，
+// 透明区域接收点击并关闭菜单，行为等同桌面原生上下文菜单。
+export component ContextMenuWindow inherits Window {
+    callback activate-result(int);
+    callback reveal-result(int);
+    callback copy-file(int);
+    callback copy-path(int);
+    callback dismiss();
+
+    in-out property <int> result-index: -1;
+    in-out property <length> menu-x: 0;
+    in-out property <length> menu-y: 0;
+    in-out property <length> overlay-width: 960px;
+    in-out property <length> overlay-height: 600px;
+
+    title: "如意寻菜单";
+    width: root.overlay-width;
+    height: root.overlay-height;
+    no-frame: true;
+    always-on-top: true;
+    // Deepin/UOS 的合成器会让完全透明的 X11 像素穿透输入。保留 1/255
+    // 的 alpha 可让空白区接收点击并关闭菜单，视觉上仍等同全透明。
+    background: #00000001;
+
+    TouchArea {
+        width: root.overlay-width;
+        height: root.overlay-height;
+        clicked => { root.dismiss(); }
+    }
+
+    Rectangle {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 188px;
+        height: 4 * 32px + 8px;
+        border-radius: 8px;
+        background: #f7fafc;
+        border-color: #cbd7e3;
+        border-width: 1px;
+        drop-shadow-blur: 14px;
+        drop-shadow-color: #10263a40;
+        drop-shadow-offset-y: 6px;
+        clip: true;
+
+        VerticalLayout {
+            padding: 4px;
+            spacing: 0px;
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: open-touch.has-hover ? #dcecf2 : transparent;
+
+                open-touch := TouchArea {
+                    clicked => { root.activate-result(root.result-index); }
+                }
+
+                Text {
+                    text: "打开";
+                    color: #152735;
+                    font-size: 13px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 12px;
+                    width: parent.width - 24px;
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: reveal-touch.has-hover ? #dcecf2 : transparent;
+
+                reveal-touch := TouchArea {
+                    clicked => { root.reveal-result(root.result-index); }
+                }
+
+                Text {
+                    text: "打开所在文件夹";
+                    color: #152735;
+                    font-size: 13px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 12px;
+                    width: parent.width - 24px;
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: copy-touch.has-hover ? #dcecf2 : transparent;
+
+                copy-touch := TouchArea {
+                    clicked => { root.copy-file(root.result-index); }
+                }
+
+                Text {
+                    text: "复制文件";
+                    color: #152735;
+                    font-size: 13px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 12px;
+                    width: parent.width - 24px;
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                border-radius: 6px;
+                background: copy-path-touch.has-hover ? #dcecf2 : transparent;
+
+                copy-path-touch := TouchArea {
+                    clicked => { root.copy-path(root.result-index); }
+                }
+
+                Text {
+                    text: "复制路径";
+                    color: #152735;
+                    font-size: 13px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 12px;
+                    width: parent.width - 24px;
+                }
+            }
+        }
+    }
+}

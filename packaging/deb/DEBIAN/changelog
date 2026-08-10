@@ -1,3 +1,17 @@
+ruyiseek (0.1.0-14) unstable; urgency=high
+
+  * Replace the results Flickable with a Slint ScrollView so long result sets
+    have a visible, draggable scrollbar while retaining wheel scrolling.
+  * Anchor the context menu to the real pointer position and account for the
+    negative ScrollView viewport offset, fixing missing menus on later rows.
+  * Render the context menu in an independent always-on-top X11 window so all
+    four actions can extend beyond the launcher's clipped search card.
+  * Clamp the menu to the physical UOS screen, close it from a full-screen
+    input overlay, and restore launcher focus through the EWMH active-window
+    protocol after dismissal.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 13:13:00 +0000
+
 ruyiseek (0.1.0-13) unstable; urgency=high
 
   * Fix the UOS runtime bundle to copy each SONAME symlink and its resolved
