@@ -1,0 +1,150 @@
+name: Upload v0.1.0-12 UOS package
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/upload-deb-v0.1.0-12.yml
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build, verify and upload amd64 deb
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: v0.1.0-12
+      RELEASE_TARGET: 4eeb3b3140f96abb773ef45ef6a4d9b395587eef
+      BASE_PACKAGE_SHA256: 2ed154248adc89d2d790d019db2eda6e23aa5306f7c471c04de52a5c872d5518
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
+      RUSTFLAGS: -C panic=abort -C strip=symbols
+    steps:
+      - name: Check out the tested release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TARGET }}
+
+      - name: Install Rust 1.75 and musl standard library
+        run: |
+          rustup toolchain install 1.75.0 --profile minimal
+          rustup target add --toolchain 1.75.0 x86_64-unknown-linux-musl
+
+      - name: Build the updated static daemon
+        run: |
+          cargo +1.75.0 build \
+            --release \
+            --locked \
+            --target x86_64-unknown-linux-musl \
+            -p ruyiseekd
+
+          daemon=target/x86_64-unknown-linux-musl/release/ruyiseekd
+          file "$daemon"
+          file "$daemon" | grep -Eq 'static-pie linked|statically linked'
+          if readelf -d "$daemon" 2>/dev/null | grep -q NEEDED; then
+            echo "ruyiseekd unexpectedly has dynamic library dependencies" >&2
+            exit 1
+          fi
+          "$daemon" --help | grep -F 'disables volume discovery'
+          strings "$daemon" | grep -F '/proc/self/mountinfo'
+
+      - name: Repack the UOS-compatible v0.1.0-12 package
+        run: |
+          mkdir -p dist staging
+          base_deb=dist/ruyiseek_0.1.0-11_amd64.deb
+          output_deb=dist/ruyiseek_0.1.0-12_amd64.deb
+
+          curl --fail --location --retry 3 \
+            --output "$base_deb" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0-11/ruyiseek_0.1.0-11_amd64.deb"
+          echo "$BASE_PACKAGE_SHA256  $base_deb" | sha256sum --check --strict
+
+          dpkg-deb --raw-extract "$base_deb" staging
+          install -m 0755 \
+            target/x86_64-unknown-linux-musl/release/ruyiseekd \
+            staging/usr/bin/ruyiseekd
+
+          cp -a packaging/deb/DEBIAN/. staging/DEBIAN/
+          install -m 0644 packaging/deb/usr/share/doc/ruyiseek/README \
+            staging/usr/share/doc/ruyiseek/README
+          gzip -9n -c packaging/deb/DEBIAN/changelog \
+            > staging/usr/share/doc/ruyiseek/changelog.gz
+
+          installed_size=$(du -sk --exclude=DEBIAN staging | cut -f1)
+          sed -i "s/^Installed-Size:.*/Installed-Size: $installed_size/" \
+            staging/DEBIAN/control
+
+          dpkg-deb --build --root-owner-group staging "$output_deb"
+          sha256sum "$output_deb" > "${output_deb}.sha256"
+
+      - name: Validate package metadata and protocol smoke test
+        run: |
+          deb=dist/ruyiseek_0.1.0-12_amd64.deb
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb" > dist/package-contents.txt
+          dpkg-deb --field "$deb" Package | grep -Fx ruyiseek
+          dpkg-deb --field "$deb" Version | grep -Fx 0.1.0-12
+          dpkg-deb --field "$deb" Architecture | grep -Fx amd64
+
+          mkdir -p smoke/root smoke/home smoke/extracted
+          printf 'external volume search marker\n' > smoke/root/volume-visible-marker.txt
+          dpkg-deb --extract "$deb" smoke/extracted
+          daemon=smoke/extracted/usr/bin/ruyiseekd
+          client=smoke/extracted/usr/bin/ruyi
+          socket="$PWD/smoke/ruyiseek.sock"
+
+          HOME="$PWD/smoke/home" "$daemon" \
+            --root "$PWD/smoke/root" \
+            --socket "$socket" &
+          daemon_pid=$!
+          for _ in $(seq 1 50); do
+            [ -S "$socket" ] && break
+            sleep 0.1
+          done
+          [ -S "$socket" ]
+          "$client" --socket "$socket" ping | grep -F 'ruyiseekd online'
+          "$client" --socket "$socket" search volume-visible-marker \
+            | grep -F 'volume-visible-marker.txt'
+          "$client" --socket "$socket" stop | grep -F acknowledged
+          wait "$daemon_pid"
+
+          file "$daemon" | grep -Eq 'static-pie linked|statically linked'
+          ! readelf -d "$daemon" 2>/dev/null | grep -q NEEDED
+          sha256sum --check --strict "${deb}.sha256"
+
+      - name: Upload package and checksum to the release
+        run: |
+          deb=dist/ruyiseek_0.1.0-12_amd64.deb
+          gh release upload "$RELEASE_TAG" \
+            "$deb" "${deb}.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+          gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq .body > release-notes.md
+          sed -i '/本次先发布已验证源码/d' release-notes.md
+          package_sha=$(cut -d' ' -f1 "${deb}.sha256")
+          cat >> release-notes.md <<NOTES
+
+          ## 安装包
+
+          已附加统信 UOS / Deepin x86_64 安装包：
+
+          \`\`\`bash
+          sudo apt install ./ruyiseek_0.1.0-12_amd64.deb
+          \`\`\`
+
+          SHA-256：\`$package_sha\`
+          NOTES
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes-file release-notes.md
+
+          gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[] | [.name, .size, .url] | @tsv'
