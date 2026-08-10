@@ -86,7 +86,7 @@ fn clipboard_uri_list_round_trip_under_xvfb() {
     eprintln!("xclip text/uri-list 读取失败，跳过断言");
 }
 
-/// Start the real RuyiSeek clipboard owner and keep its guard alive while the
+/// Start the real `RuyiSeek` clipboard owner and keep its guard alive while the
 /// independent xclip client reads the selection back.
 fn run_clipboard_setter(payload: &str, mime: ClipboardMime) -> Option<ClipboardOwner> {
     match set_clipboard(payload.as_bytes().to_vec(), mime) {
