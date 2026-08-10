@@ -19,6 +19,8 @@ ruyiseek (0.1.0-12) unstable; urgency=medium
     rustfmt baseline so GitHub CI proceeds past its formatting gate.
   * Run CI tests and Clippy on the native GNU target instead of inheriting the
     musl release target without its standard library or release toolchain.
+  * Fix the v0.1.0-11 X11 clipboard TARGETS array lifetime for Rust 1.75;
+    keep the fixed-size atom array by value instead of borrowing temporaries.
 
  -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Mon, 10 Aug 2026 03:30:00 +0000
 

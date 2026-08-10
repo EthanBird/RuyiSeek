@@ -278,12 +278,12 @@ fn handle_request(
     };
 
     if request.target == atoms.targets {
-        let offered: &[Atom] = match mime {
-            ClipboardMime::Text => &[atoms.utf8_string, atoms.text, atoms.text_uri_list],
-            ClipboardMime::UriList => &[atoms.text_uri_list, atoms.utf8_string, atoms.text],
+        let offered: [Atom; 3] = match mime {
+            ClipboardMime::Text => [atoms.utf8_string, atoms.text, atoms.text_uri_list],
+            ClipboardMime::UriList => [atoms.text_uri_list, atoms.utf8_string, atoms.text],
         };
         let mut bytes = Vec::with_capacity(offered.len() * 4);
-        for atom in offered {
+        for atom in &offered {
             bytes.extend_from_slice(&atom.to_be_bytes());
         }
         let _ = connection.change_property(
