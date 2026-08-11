@@ -7,11 +7,11 @@ buster）和 Deepin 桌面环境构建。
 安装
 ----
 
-    sudo apt install ./ruyiseek_0.1.0-14_amd64.deb
+    sudo apt install ./ruyiseek_0.1.0-15_amd64.deb
 
 或：
 
-    sudo dpkg -i ruyiseek_0.1.0-14_amd64.deb
+    sudo dpkg -i ruyiseek_0.1.0-15_amd64.deb
 
 本包已经内置 UI 所需的 UOS 20 共享库闭包，不需要联网补装 X11、字体或
 其他运行时依赖。
@@ -58,7 +58,7 @@ config.toml 与 config.toml.previous 被视为用户配置，不会被升级覆�
 已知限制（与上游一致）
 ----------------------
 
-  * 索引范围仅在内存快照，未持久化；
+  * 索引仅保存在内存中，重启后会重新扫描；运行期间的文件变化会自动刷新；
   * 拼音匹配、收藏、网络目录将在后续阶段提供；
   * Wayland 下双击 Ctrl 需要 Portal/DDE 提供合规能力。
 

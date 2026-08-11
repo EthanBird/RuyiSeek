@@ -1,8 +1,8 @@
-//! Bootstrap filesystem scanner.
+//! Bounded filesystem scanner used to build the daemon's in-memory search snapshot.
 //!
-//! The scanner builds a bounded in-memory snapshot for the first vertical slice. It does
-//! not follow symlinks and never requires elevated privileges. Persistent snapshots and
-//! inotify journals belong to the native index milestone.
+//! The scan does not follow symlinks and never requires elevated privileges. Along with
+//! searchable items it reports every directory that was successfully traversed, allowing
+//! the daemon to attach file-change watches without walking the tree a second time.
 
 mod mounts;
 
@@ -34,6 +34,7 @@ impl Default for ScanOptions {
 #[derive(Debug, Default)]
 pub struct ScanReport {
     pub items: Vec<SearchItem>,
+    pub scanned_directories: Vec<PathBuf>,
     pub skipped_paths: usize,
     pub truncated: bool,
 }
@@ -50,6 +51,7 @@ pub fn scan(options: &ScanOptions) -> ScanReport {
             report.skipped_paths += 1;
             continue;
         };
+        report.scanned_directories.push(directory);
 
         for entry in entries {
             if report.items.len() >= options.max_entries {
@@ -167,6 +169,10 @@ mod tests {
         assert!(names.contains(&"folder"));
         assert!(names.contains(&"report.txt"));
         assert!(!names.contains(&".hidden"));
+        assert_eq!(
+            report.scanned_directories,
+            vec![root.clone(), root.join("folder")]
+        );
         assert_eq!(report.skipped_paths, 0);
         assert!(!report.truncated);
 

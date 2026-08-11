@@ -1,3 +1,21 @@
+ruyiseek (0.1.0-15) unstable; urgency=high
+
+  * Watch every successfully scanned directory with Linux inotify. Creating,
+    deleting or renaming files now rebuilds the in-memory index in the
+    background, so newly created Chinese filenames such as 中文.txt become
+    searchable without restarting the daemon.
+  * Keep mount discovery and explicit --root mode on the same refresh path,
+    retain the old index while rebuilding, and schedule a follow-up pass when
+    a filesystem event races with a scan.
+  * Add a five-minute fallback refresh for unwatched directories or exhausted
+    inotify limits, while avoiding rebuilds for content-only file writes.
+  * Reap a UI-spawned daemon when it exits so stopping it from the CLI no
+    longer leaves a zombie child behind while the UI remains open.
+  * Serialize the two X11 clipboard round-trip tests because a display has one
+    CLIPBOARD selection and parallel tests otherwise steal it from each other.
+
+ -- RuyiSeek contributors <ruyiseek@users.noreply.github.com>  Tue, 11 Aug 2026 14:03:00 +0000
+
 ruyiseek (0.1.0-14) unstable; urgency=high
 
   * Replace the results Flickable with a Slint ScrollView so long result sets

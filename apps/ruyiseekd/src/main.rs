@@ -4,9 +4,12 @@ use ruyiseek_ipc::{
     Request, Response, PROTOCOL_VERSION,
 };
 use ruyiseek_query::SearchEngine;
+use rustix::fs::inotify;
+use rustix::io::Errno;
 use std::error::Error;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::mem::MaybeUninit;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -16,7 +19,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
-const MOUNT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const REFRESH_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const FALLBACK_RESCAN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const AUTO_ENTRIES_PER_ROOT: usize = 250_000;
 const AUTO_ENTRIES_MAX: usize = 2_000_000;
 
@@ -34,6 +38,7 @@ struct IndexState {
     engine: SearchEngine,
     status: DaemonStatus,
     roots: Vec<PathBuf>,
+    scanned_directories: Vec<PathBuf>,
     max_entries: usize,
 }
 
@@ -64,20 +69,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         initial_state.max_entries
     );
     let state = Arc::new(RwLock::new(initial_state));
-    let _mount_monitor = if config.once {
+    let _refresh_monitor = if config.once {
         None
     } else {
-        config
-            .automatic_home
-            .map(|home| {
-                spawn_mount_monitor(
-                    home,
-                    config.include_hidden,
-                    config.max_entries,
-                    Arc::clone(&state),
-                )
-            })
-            .transpose()?
+        Some(spawn_refresh_monitor(
+            config.automatic_home,
+            config.include_hidden,
+            config.max_entries,
+            Arc::clone(&state),
+        )?)
     };
     eprintln!("ruyiseekd: listening on {}", config.socket.display());
 
@@ -163,6 +163,7 @@ fn build_index_state(roots: Vec<PathBuf>, include_hidden: bool, max_entries: usi
         engine: SearchEngine::new(report.items),
         status,
         roots,
+        scanned_directories: report.scanned_directories,
         max_entries,
     }
 }
@@ -185,49 +186,100 @@ fn entry_limit(configured: Option<usize>, root_count: usize) -> usize {
     })
 }
 
-fn spawn_mount_monitor(
-    home: PathBuf,
+fn spawn_refresh_monitor(
+    automatic_home: Option<PathBuf>,
     include_hidden: bool,
     configured_max_entries: Option<usize>,
     state: Arc<RwLock<IndexState>>,
-) -> io::Result<MountMonitor> {
+) -> io::Result<RefreshMonitor> {
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
     let handle = thread::Builder::new()
-        .name("ruyiseek-mount-monitor".to_owned())
+        .name("ruyiseek-refresh-monitor".to_owned())
         .spawn(move || {
+            let initial_directories = state
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .scanned_directories
+                .clone();
+            let mut watcher = create_file_watcher(&initial_directories);
+            let mut last_refresh = Instant::now();
+            let mut refresh_pending = false;
+
             while !worker_stop.load(Ordering::Acquire) {
-                thread::park_timeout(MOUNT_POLL_INTERVAL);
+                thread::park_timeout(REFRESH_POLL_INTERVAL);
                 if worker_stop.load(Ordering::Acquire) {
                     break;
                 }
 
-                let roots = match discover_default_roots(&home) {
-                    Ok(roots) => roots,
-                    Err(error) => {
-                        eprintln!("ruyiseekd: mount refresh failed: {error}");
-                        continue;
-                    }
-                };
+                let file_changed = refresh_pending
+                    || watcher.as_ref().is_some_and(|active| {
+                        match active.has_changes() {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                eprintln!("ruyiseekd: file watch failed: {error}");
+                                true
+                            }
+                        }
+                    });
+                refresh_pending = false;
+
                 let current_roots = state
                     .read()
                     .unwrap_or_else(PoisonError::into_inner)
                     .roots
                     .clone();
-                if roots == current_roots {
+                let roots = match automatic_home.as_deref() {
+                    Some(home) => match discover_default_roots(home) {
+                        Ok(roots) => roots,
+                        Err(error) => {
+                            eprintln!("ruyiseekd: mount refresh failed: {error}");
+                            current_roots.clone()
+                        }
+                    },
+                    None => current_roots.clone(),
+                };
+                let mounts_changed = roots != current_roots;
+                let fallback_due = last_refresh.elapsed() >= FALLBACK_RESCAN_INTERVAL;
+                if !file_changed && !mounts_changed && !fallback_due {
                     continue;
                 }
 
-                eprintln!(
-                    "ruyiseekd: mount set changed ({} -> {} roots), rebuilding index",
-                    current_roots.len(),
-                    roots.len()
-                );
+                if mounts_changed {
+                    eprintln!(
+                        "ruyiseekd: mount set changed ({} -> {} roots), rebuilding index",
+                        current_roots.len(),
+                        roots.len()
+                    );
+                } else if file_changed {
+                    eprintln!("ruyiseekd: filesystem changed, rebuilding index");
+                } else {
+                    eprintln!("ruyiseekd: periodic fallback refresh, rebuilding index");
+                }
                 let max_entries = entry_limit(configured_max_entries, roots.len());
                 let replacement = build_index_state(roots, include_hidden, max_entries);
                 if worker_stop.load(Ordering::Acquire) {
                     break;
                 }
+
+                let replacement_watcher = create_file_watcher(&replacement.scanned_directories);
+                // Keep the old watcher alive throughout the scan and creation of the new
+                // watcher. If something changed while rebuilding, schedule one more pass so
+                // an event racing with the directory walk cannot leave a stale snapshot.
+                refresh_pending = watcher.as_ref().is_some_and(|active| {
+                    active.has_changes().unwrap_or_else(|error| {
+                        eprintln!("ruyiseekd: file watch follow-up failed: {error}");
+                        true
+                    })
+                }) || replacement_watcher.as_ref().is_some_and(|active| {
+                    active.has_changes().unwrap_or_else(|error| {
+                        eprintln!("ruyiseekd: replacement file watch failed: {error}");
+                        true
+                    })
+                });
+                watcher = replacement_watcher;
+                last_refresh = Instant::now();
+
                 eprintln!(
                     "ruyiseekd: refreshed {} items from {} root(s), skipped {}, truncated={}, limit={}",
                     replacement.status.indexed_items,
@@ -239,20 +291,97 @@ fn spawn_mount_monitor(
                 *state.write().unwrap_or_else(PoisonError::into_inner) = replacement;
             }
         })?;
-    let worker = handle.thread().clone();
-    drop(handle);
-    Ok(MountMonitor { stop, worker })
+    Ok(RefreshMonitor {
+        stop,
+        handle: Some(handle),
+    })
 }
 
-struct MountMonitor {
+fn create_file_watcher(directories: &[PathBuf]) -> Option<FileWatcher> {
+    match FileWatcher::new(directories) {
+        Ok(watcher) => {
+            if watcher.skipped > 0 {
+                eprintln!(
+                    "ruyiseekd: watching {} directories; {} could not be watched",
+                    watcher.watched, watcher.skipped
+                );
+            } else {
+                eprintln!("ruyiseekd: watching {} directories", watcher.watched);
+            }
+            Some(watcher)
+        }
+        Err(error) => {
+            eprintln!(
+                "ruyiseekd: file watching unavailable ({error}); periodic refresh remains active"
+            );
+            None
+        }
+    }
+}
+
+struct FileWatcher {
+    fd: std::os::fd::OwnedFd,
+    watched: usize,
+    skipped: usize,
+}
+
+impl FileWatcher {
+    fn new(directories: &[PathBuf]) -> io::Result<Self> {
+        let fd = inotify::init(inotify::CreateFlags::CLOEXEC | inotify::CreateFlags::NONBLOCK)
+            .map_err(errno_to_io)?;
+        let flags = inotify::WatchFlags::CREATE
+            | inotify::WatchFlags::DELETE
+            | inotify::WatchFlags::DELETE_SELF
+            | inotify::WatchFlags::MOVED_FROM
+            | inotify::WatchFlags::MOVED_TO
+            | inotify::WatchFlags::MOVE_SELF
+            | inotify::WatchFlags::DONT_FOLLOW
+            | inotify::WatchFlags::EXCL_UNLINK
+            | inotify::WatchFlags::ONLYDIR;
+        let mut watched = 0;
+        let mut skipped = 0;
+        for directory in directories {
+            match inotify::add_watch(&fd, directory, flags) {
+                Ok(_) => watched += 1,
+                Err(_) => skipped += 1,
+            }
+        }
+        Ok(Self {
+            fd,
+            watched,
+            skipped,
+        })
+    }
+
+    fn has_changes(&self) -> io::Result<bool> {
+        let mut buffer = [MaybeUninit::<u8>::uninit(); 64 * 1024];
+        let mut reader = inotify::Reader::new(&self.fd, &mut buffer);
+        match reader.next() {
+            Ok(_) => Ok(true),
+            Err(Errno::AGAIN) => Ok(false),
+            Err(error) => Err(errno_to_io(error)),
+        }
+    }
+}
+
+fn errno_to_io(error: Errno) -> io::Error {
+    io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+struct RefreshMonitor {
     stop: Arc<AtomicBool>,
-    worker: thread::Thread,
+    handle: Option<thread::JoinHandle<()>>,
 }
 
-impl Drop for MountMonitor {
+impl Drop for RefreshMonitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        self.worker.unpark();
+        if let Some(handle) = self.handle.take() {
+            handle.thread().unpark();
+            if handle.join().is_err() {
+                eprintln!("ruyiseekd: refresh monitor panicked during shutdown");
+            }
+        }
     }
 }
 
@@ -387,6 +516,7 @@ mod tests {
     use ruyiseek_core::{ItemKind, SearchItem};
     use ruyiseek_ipc::{decode_response, encode_request};
     use std::io::Cursor;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct MemoryStream {
         input: Cursor<Vec<u8>>,
@@ -433,8 +563,37 @@ mod tests {
                 truncated: false,
             },
             roots: vec![PathBuf::from("/project")],
+            scanned_directories: vec![PathBuf::from("/project")],
             max_entries: 250_000,
         })
+    }
+
+    #[test]
+    fn file_watcher_detects_a_new_chinese_filename() {
+        let root = std::env::temp_dir().join(format!(
+            "ruyiseekd-watch-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock must be after the Unix epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("create watcher fixture");
+        let watcher = FileWatcher::new(std::slice::from_ref(&root)).expect("create file watcher");
+
+        fs::write(root.join("中文.txt"), b"").expect("create Chinese-named file");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut changed = false;
+        while Instant::now() < deadline {
+            changed = watcher.has_changes().expect("read file watch events");
+            if changed {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(changed, "creating 中文.txt should emit an inotify event");
+        fs::remove_dir_all(&root).expect("remove watcher fixture");
     }
 
     #[test]

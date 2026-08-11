@@ -9,10 +9,19 @@
 
 use ruyiseek_platform::x11_clipboard::{set_clipboard, ClipboardMime, ClipboardOwner};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::Duration;
+
+// X11 has one CLIPBOARD selection per display. Rust runs tests in parallel by
+// default, so these two round trips must not steal the selection from each
+// other when they share the same Xvfb server.
+static CLIPBOARD_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn clipboard_round_trip_under_xvfb() {
+    let _clipboard_guard = CLIPBOARD_TEST_LOCK
+        .lock()
+        .expect("clipboard test lock should not be poisoned");
     if std::env::var("DISPLAY").is_err() {
         eprintln!("DISPLAY 未设置，跳过 X11 集成测试");
         return;
@@ -55,6 +64,9 @@ fn clipboard_round_trip_under_xvfb() {
 
 #[test]
 fn clipboard_uri_list_round_trip_under_xvfb() {
+    let _clipboard_guard = CLIPBOARD_TEST_LOCK
+        .lock()
+        .expect("clipboard test lock should not be poisoned");
     if std::env::var("DISPLAY").is_err() {
         return;
     }

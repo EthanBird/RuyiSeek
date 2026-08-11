@@ -9,6 +9,7 @@ repository.workspace = true
 ruyiseek-index = { path = "../../crates/ruyiseek-index" }
 ruyiseek-ipc = { path = "../../crates/ruyiseek-ipc" }
 ruyiseek-query = { path = "../../crates/ruyiseek-query" }
+rustix = { version = "=0.38.44", features = ["fs"] }
 
 [dev-dependencies]
 ruyiseek-core = { path = "../../crates/ruyiseek-core" }

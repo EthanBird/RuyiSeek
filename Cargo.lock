@@ -2410,6 +2410,7 @@ dependencies = [
 name = "ruyiseekd"
 version = "0.1.0"
 dependencies = [
+ "rustix 0.38.44",
  "ruyiseek-core",
  "ruyiseek-index",
  "ruyiseek-ipc",

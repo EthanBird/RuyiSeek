@@ -922,7 +922,21 @@ fn ensure_daemon_running() {
             .spawn()
     };
     match spawn_result {
-        Ok(_child) => { /* intentionally drop the Child handle so the daemon outlives the UI; the OS reparents it to PID 1 when this UI exits. */
+        Ok(mut child) => {
+            // Keep a lightweight waiter while the UI is alive. Dropping Child does not reap
+            // it, so a daemon stopped from the CLI would otherwise remain as a zombie until
+            // the UI exits. If the UI exits first, the daemon still survives and PID 1 adopts
+            // it because setsid() detached it from the UI's session.
+            if let Err(error) = thread::Builder::new()
+                .name("ruyiseek-daemon-reaper".to_owned())
+                .spawn(move || {
+                    if let Err(error) = child.wait() {
+                        eprintln!("ruyiseek-ui: 回收 ruyiseekd 子进程失败：{error}");
+                    }
+                })
+            {
+                eprintln!("ruyiseek-ui: 无法启动 ruyiseekd 回收线程：{error}");
+            }
         }
         Err(error) => {
             eprintln!("ruyiseek-ui: 无法启动 ruyiseekd：{error}");

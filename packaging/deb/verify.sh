@@ -149,6 +149,28 @@ if [ "$SKIP_DAEMON" -eq 0 ]; then
     "$client" --socket "$socket" ping | grep -Fq 'ruyiseekd online'
     "$client" --socket "$socket" search volume-visible-marker \
         | grep -Fq 'volume-visible-marker.txt'
+
+    # A file created after the initial scan must become searchable without
+    # restarting the daemon. Keep a Chinese filename here to cover the UOS
+    # regression that motivated the runtime inotify refresh.
+    printf '运行期索引刷新\n' >"$work_dir/search-root/中文.txt"
+    refreshed=0
+    for _ in $(seq 1 100); do
+        if "$client" --socket "$socket" search 中文 \
+            | grep -Fq '中文.txt'; then
+            refreshed=1
+            break
+        fi
+        sleep 0.05
+    done
+    if [ "$refreshed" -ne 1 ]; then
+        cat "$work_dir/daemon.log" >&2
+        "$client" --socket "$socket" stop >/dev/null 2>&1 || true
+        wait "$daemon_pid" 2>/dev/null || true
+        echo "verify.sh: runtime-created Chinese filename was not indexed" >&2
+        exit 1
+    fi
+
     "$client" --socket "$socket" stop | grep -Fq acknowledged
     wait "$daemon_pid"
 fi
